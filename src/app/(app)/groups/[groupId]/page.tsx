@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { CommentItem } from "@/components/groups/comment-item";
+import { ShareGroupButton } from "@/components/groups/share-group-button";
 
 function ymd(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -252,9 +253,12 @@ export default async function GroupDetailPage({
               </p>
             </div>
           </div>
-          <Link className="button-ghost h-10 rounded-full px-3" href="/groups">
-            Menu
-          </Link>
+          <div className="flex items-center gap-2">
+            <ShareGroupButton groupCode={group.code} />
+            <Link className="button-ghost h-10 rounded-full px-3" href="/groups">
+              Menu
+            </Link>
+          </div>
         </div>
         <Link className="button-primary w-full" href={`/submit?groupId=${group.id}`}>
           Registrar jugada
