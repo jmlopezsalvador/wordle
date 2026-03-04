@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export default async function LoginPage() {
@@ -12,7 +13,10 @@ export default async function LoginPage() {
   const signIn = async () => {
     "use server";
     const supabaseServer = await createSupabaseServerClient();
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const h = await headers();
+    const proto = h.get("x-forwarded-proto") || "http";
+    const host = h.get("x-forwarded-host") || h.get("host");
+    const appUrl = host ? `${proto}://${host}` : process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
     const { data, error } = await supabaseServer.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: `${appUrl}/auth/callback` }
