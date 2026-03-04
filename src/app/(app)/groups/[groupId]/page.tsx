@@ -189,6 +189,7 @@ export default async function GroupDetailPage({
     ...r,
     progress: Math.max(8, Math.round(((raceMax - r.score + 1) / (raceMax + 1)) * 100))
   }));
+  const submittedToday = new Set((daySubmissions || []).map((s) => s.user_id));
 
   const prevDate = moveDay(selectedDate, -1);
   const nextDate = moveDay(selectedDate, 1);
@@ -322,9 +323,20 @@ export default async function GroupDetailPage({
         <div className="space-y-2">
           {ranking.map((r, idx) => (
             <div key={r.userId} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
-              <p className="text-sm">
-                {idx + 1}. {r.name}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm">
+                  {idx + 1}. {r.name}
+                </p>
+                {submittedToday.has(r.userId) ? (
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-xs text-emerald-700" title="Registrado este dia">
+                    ✓
+                  </span>
+                ) : (
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-xs text-amber-700" title="Pendiente de registrar hoy">
+                    ◷
+                  </span>
+                )}
+              </div>
               <p className="font-semibold">{r.score}</p>
             </div>
           ))}
