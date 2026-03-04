@@ -255,8 +255,8 @@ export default async function GroupDetailPage({
           </div>
           <div className="flex items-center gap-2">
             <ShareGroupButton groupCode={group.code} />
-            <Link className="button-ghost h-10 rounded-full px-3" href="/groups">
-              Menu
+            <Link className="button-ghost inline-flex h-10 w-10 items-center justify-center rounded-full p-0 text-lg" href="/groups" aria-label="Menu" title="Menu">
+              {"\u2630"}
             </Link>
           </div>
         </div>

@@ -37,8 +37,14 @@ export function ShareGroupButton({ groupCode }: ShareGroupButtonProps) {
   };
 
   return (
-    <button type="button" className="button-secondary h-10 px-3" onClick={share}>
-      {copied ? "Copiado" : "Compartir grupo"}
+    <button
+      type="button"
+      className="button-secondary h-10 w-10 rounded-full p-0 text-base"
+      onClick={share}
+      aria-label={copied ? "Copiado" : "Compartir grupo"}
+      title={copied ? "Copiado" : "Compartir grupo"}
+    >
+      {copied ? "\u2713" : "\u21AA"}
     </button>
   );
 }
