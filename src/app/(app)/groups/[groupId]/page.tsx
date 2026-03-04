@@ -164,19 +164,32 @@ export default async function GroupDetailPage({
     attemptsByUserDay.set(key, (attemptsByUserDay.get(key) || 0) + item.attempts);
   }
 
-  const rankingData: Array<{ userId: string; score: number; name: string; avatar: string | null; role: string }> = [];
+  const rankingData: Array<{
+    userId: string;
+    score: number;
+    name: string;
+    avatar: string | null;
+    role: string;
+    dayPoints: number;
+    previousScore: number;
+  }> = [];
   for (const member of members || []) {
     const joinedOn = ymd(new Date(member.joined_at));
     let total = 0;
+    let dayPoints = 0;
     if (joinedOn <= selectedDate) {
       for (const day of dateRange(joinedOn, selectedDate)) {
         const dayAttempts = attemptsByUserDay.get(`${member.user_id}:${day}`) || 0;
-        total += dayAttempts > 0 ? dayAttempts : 2;
+        const points = dayAttempts > 0 ? dayAttempts : 2;
+        total += points;
+        if (day === selectedDate) dayPoints = points;
       }
     }
     rankingData.push({
       userId: member.user_id,
       score: total,
+      previousScore: Math.max(0, total - dayPoints),
+      dayPoints,
       name: displayName(profileMap.get(member.user_id)?.username),
       avatar: profileMap.get(member.user_id)?.avatar_url ?? null,
       role: member.role
@@ -235,7 +248,7 @@ export default async function GroupDetailPage({
             <div>
               <h1 className="title-xl">{group.name}</h1>
               <p className="muted">
-                Codigo: {group.code} · Modo: {group.entry_mode === "history" ? "historial" : "diario"}
+                Codigo: {group.code} - Modo: {group.entry_mode === "history" ? "historial" : "diario"}
               </p>
             </div>
           </div>
