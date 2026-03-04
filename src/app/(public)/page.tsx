@@ -1,19 +1,21 @@
 import Link from "next/link";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export default function HomePage() {
+export default async function HomePage() {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+  const entryHref = user ? "/groups" : "/login";
+
   return (
     <section className="space-y-5">
-      <div className="panel space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-sky-600">MVP</p>
-        <h1 className="title-xl">Ranking Wordle con amigos</h1>
-        <p className="muted">Mobile-first, grupos privados y ranking por menor puntuacion acumulada.</p>
+      <div className="panel">
+        <h1 className="title-xl text-center text-sky-600">WORDLE FRIENDS</h1>
       </div>
-      <div className="grid gap-3">
-        <Link className="button-primary" href="/login">
+      <div>
+        <Link className="button-primary w-full" href={entryHref}>
           Entrar
-        </Link>
-        <Link className="button-secondary" href="/groups">
-          Ir a grupos
         </Link>
       </div>
     </section>

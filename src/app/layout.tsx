@@ -11,6 +11,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="es">
       <body>
         <main className="container-shell py-6">{children}</main>
+        <footer className="pb-6 text-center text-xs text-slate-500">Developed By WikiCode</footer>
       </body>
     </html>
   );
