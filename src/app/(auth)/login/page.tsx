@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { SubmitOnceButton } from "@/components/ui/submit-once-button";
 
 export default async function LoginPage() {
   const supabase = await createSupabaseServerClient();
@@ -32,9 +33,9 @@ export default async function LoginPage() {
         <p className="muted">Login rapido para crear grupos, registrar partidas y comparar ranking diario.</p>
       </div>
       <form action={signIn} className="panel">
-        <button className="button-primary w-full" type="submit">
+        <SubmitOnceButton className="button-primary w-full" pendingText="Abriendo Google...">
           Continuar con Google
-        </button>
+        </SubmitOnceButton>
       </form>
     </section>
   );

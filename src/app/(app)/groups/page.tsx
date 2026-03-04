@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { generateGroupCode } from "@/lib/groups";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { SubmitOnceButton } from "@/components/ui/submit-once-button";
 
 function initials(email: string | null | undefined) {
   const raw = email?.split("@")[0] || "U";
@@ -164,9 +165,9 @@ export default async function GroupsPage({
             </div>
           </div>
           <form action={signOut}>
-            <button className="button-ghost h-10 rounded-full px-3" type="submit">
+            <SubmitOnceButton className="button-secondary h-10 rounded-full px-4" pendingText="Saliendo...">
               Salir
-            </button>
+            </SubmitOnceButton>
           </form>
         </div>
       </div>
@@ -210,9 +211,8 @@ export default async function GroupsPage({
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={group.icon_url} alt="Icono grupo" className="h-10 w-10 rounded-lg object-cover" />
                 ) : (
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-200 text-xs font-semibold text-slate-700">
-                    {group.name.slice(0, 2).toUpperCase()}
-                  </div>
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src="/default-group-logo.svg" alt="Icono grupo por defecto" className="h-10 w-10 rounded-lg object-cover" />
                 )}
                 <div>
                   <p className="font-semibold">{group.name}</p>
@@ -235,16 +235,16 @@ export default async function GroupsPage({
             <h3 className="text-sm font-semibold">Crear grupo</h3>
             <input className="input" name="name" placeholder="Nombre del grupo" required />
             <input className="input" name="icon_url" placeholder="URL icono (opcional)" />
-            <button className="button-primary w-full" type="submit">
+            <SubmitOnceButton className="button-primary w-full" pendingText="Creando...">
               Crear
-            </button>
+            </SubmitOnceButton>
           </form>
           <form className="space-y-3 rounded-xl border border-slate-200 bg-white p-3" action={joinGroup}>
             <h3 className="text-sm font-semibold">Unirme por codigo</h3>
             <input className="input uppercase" name="code" placeholder="ABC123" required />
-            <button className="button-secondary w-full" type="submit">
+            <SubmitOnceButton className="button-secondary w-full" pendingText="Uniendo...">
               Unirme
-            </button>
+            </SubmitOnceButton>
           </form>
         </div>
       </details>

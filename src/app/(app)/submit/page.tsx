@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { SubmitOnceButton } from "@/components/ui/submit-once-button";
 
 export default async function SubmitPage({
   searchParams
@@ -54,9 +55,9 @@ export default async function SubmitPage({
           <Link className="button-secondary w-full" href={`/groups/${groupId}`}>
             Volver
           </Link>
-          <button className="button-primary w-full" type="submit">
+          <SubmitOnceButton className="button-primary w-full" pendingText="Guardando...">
             Guardar
-          </button>
+          </SubmitOnceButton>
         </div>
       </form>
     </section>

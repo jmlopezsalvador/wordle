@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { CommentItem } from "@/components/groups/comment-item";
 import { ShareGroupButton } from "@/components/groups/share-group-button";
+import { SubmitOnceButton } from "@/components/ui/submit-once-button";
 
 function ymd(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -58,6 +59,8 @@ export default async function GroupDetailPage({
     .maybeSingle();
   if (!membership) notFound();
 
+  await supabase.rpc("recalc_group_if_needed", { p_group_id: groupId });
+
   const [
     { data: group },
     { data: allSubmissions },
@@ -67,27 +70,28 @@ export default async function GroupDetailPage({
     { data: gameTypes },
     { data: dayComments }
   ] = await Promise.all([
-    supabase.from("groups").select("id,name,code,icon_url,owner_id,entry_mode").eq("id", groupId).single(),
-    supabase.from("submissions").select("user_id,attempts,played_on").eq("group_id", groupId).lte("played_on", selectedDate),
+    supabase.from("groups").select("id,name,code,icon_url,owner_id,entry_mode,penalties_enabled,new_member_start_points").eq("id", groupId).single(),
+    supabase.from("submissions").select("user_id,attempts,played_on,game_type_id").eq("group_id", groupId).lte("played_on", selectedDate),
     supabase
       .from("submissions")
       .select("id,user_id,attempts,grid_rows,game_type_id,played_on,created_at")
       .eq("group_id", groupId)
       .eq("played_on", selectedDate)
       .order("created_at", { ascending: false }),
-    supabase.from("group_members").select("user_id,role,joined_at").eq("group_id", groupId),
+    supabase.from("group_members").select("user_id,role,joined_at,initial_points").eq("group_id", groupId),
     supabase.from("profiles").select("id,username,avatar_url"),
-    supabase.from("game_types").select("id,label"),
+    supabase.from("game_types").select("id,label,max_attempts").eq("active", true),
     supabase
       .from("group_comments")
-      .select("id,user_id,body,created_at")
+      .select("id,user_id,body,created_at,parent_comment_id")
       .eq("group_id", groupId)
       .eq("comment_date", selectedDate)
-      .order("created_at", { ascending: false })
+      .order("created_at", { ascending: true })
   ]);
 
   if (!group) notFound();
   const isOwner = membership.role === "owner" || group.owner_id === user.id;
+  const isPrimaryOwner = group.owner_id === user.id;
 
   const updateGroupMeta = async (formData: FormData) => {
     "use server";
@@ -112,17 +116,6 @@ export default async function GroupDetailPage({
     redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_saved`);
   };
 
-  const forceRecalc = async () => {
-    "use server";
-    const supabaseServer = await createSupabaseServerClient();
-    const {
-      data: { user: currentUser }
-    } = await supabaseServer.auth.getUser();
-    if (!currentUser) redirect("/login");
-    await supabaseServer.rpc("recalc_group_scores", { p_group_id: groupId, p_through: ymd(new Date()) });
-    redirect(`/groups/${groupId}?date=${selectedDate}&notice=recalculated`);
-  };
-
   const kickMember = async (formData: FormData) => {
     "use server";
     const targetUserId = String(formData.get("targetUserId") || "");
@@ -136,6 +129,55 @@ export default async function GroupDetailPage({
     redirect(`/groups/${groupId}?date=${selectedDate}&notice=member_removed`);
   };
 
+  const setPenaltiesEnabled = async (formData: FormData) => {
+    "use server";
+    const enabled = String(formData.get("enabled") || "off") === "on";
+    const supabaseServer = await createSupabaseServerClient();
+    const {
+      data: { user: currentUser }
+    } = await supabaseServer.auth.getUser();
+    if (!currentUser) redirect("/login");
+    await supabaseServer.rpc("set_group_penalties_enabled", { p_group_id: groupId, p_enabled: enabled });
+    redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_saved`);
+  };
+
+  const setNewMemberStartPoints = async (formData: FormData) => {
+    "use server";
+    const points = Number(formData.get("new_member_start_points") || 0);
+    const safePoints = Number.isFinite(points) ? Math.max(0, Math.trunc(points)) : 0;
+    const supabaseServer = await createSupabaseServerClient();
+    const {
+      data: { user: currentUser }
+    } = await supabaseServer.auth.getUser();
+    if (!currentUser) redirect("/login");
+    await supabaseServer.rpc("set_group_new_member_start_points", { p_group_id: groupId, p_points: safePoints });
+    redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_saved`);
+  };
+
+  const resetSeason = async () => {
+    "use server";
+    const supabaseServer = await createSupabaseServerClient();
+    const {
+      data: { user: currentUser }
+    } = await supabaseServer.auth.getUser();
+    if (!currentUser) redirect("/login");
+    await supabaseServer.rpc("reset_group_season", { p_group_id: groupId });
+    redirect(`/groups/${groupId}?date=${selectedDate}&notice=recalculated`);
+  };
+
+  const promoteMember = async (formData: FormData) => {
+    "use server";
+    const targetUserId = String(formData.get("targetUserId") || "");
+    if (!targetUserId) return;
+    const supabaseServer = await createSupabaseServerClient();
+    const {
+      data: { user: currentUser }
+    } = await supabaseServer.auth.getUser();
+    if (!currentUser) redirect("/login");
+    await supabaseServer.rpc("promote_group_member_to_owner", { p_group_id: groupId, p_user_id: targetUserId });
+    redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_saved`);
+  };
+
   const addComment = async (formData: FormData) => {
     "use server";
     const supabaseServer = await createSupabaseServerClient();
@@ -145,14 +187,27 @@ export default async function GroupDetailPage({
     if (!currentUser) redirect("/login");
 
     const body = String(formData.get("body") || "").trim();
+    const parentCommentId = String(formData.get("parentCommentId") || "").trim();
     if (!body) redirect(`/groups/${groupId}?date=${selectedDate}&notice=comment_empty`);
     if (body.length > 280) redirect(`/groups/${groupId}?date=${selectedDate}&notice=comment_too_long`);
+
+    if (parentCommentId) {
+      const { data: parent } = await supabaseServer
+        .from("group_comments")
+        .select("id")
+        .eq("id", parentCommentId)
+        .eq("group_id", groupId)
+        .eq("comment_date", selectedDate)
+        .maybeSingle();
+      if (!parent) redirect(`/groups/${groupId}?date=${selectedDate}&notice=comment_edit_failed`);
+    }
 
     await supabaseServer.from("group_comments").insert({
       group_id: groupId,
       user_id: currentUser.id,
       comment_date: selectedDate,
-      body
+      body,
+      parent_comment_id: parentCommentId || null
     });
 
     redirect(`/groups/${groupId}?date=${selectedDate}&notice=comment_added`);
@@ -160,9 +215,12 @@ export default async function GroupDetailPage({
 
   const profileMap = new Map((profiles || []).map((p) => [p.id, p]));
   const attemptsByUserDay = new Map<string, number>();
+  const attemptsByUserDayGame = new Map<string, number>();
   for (const item of allSubmissions || []) {
     const key = `${item.user_id}:${item.played_on}`;
     attemptsByUserDay.set(key, (attemptsByUserDay.get(key) || 0) + item.attempts);
+    const keyByGame = `${item.user_id}:${item.played_on}:${item.game_type_id}`;
+    attemptsByUserDayGame.set(keyByGame, item.attempts);
   }
 
   const rankingData: Array<{
@@ -173,24 +231,57 @@ export default async function GroupDetailPage({
     role: string;
     dayPoints: number;
     previousScore: number;
+    dayGamesCount: number;
   }> = [];
+  const yesterday = moveDay(ymd(new Date()), -1);
+  const penaltyThroughDay = selectedDate < yesterday ? selectedDate : yesterday;
+
+  const activeGames = (gameTypes || []).map((g) => ({ id: g.id, maxAttempts: g.max_attempts }));
+
   for (const member of members || []) {
     const joinedOn = ymd(new Date(member.joined_at));
-    let total = 0;
-    let dayPoints = 0;
-    if (joinedOn <= selectedDate) {
-      for (const day of dateRange(joinedOn, selectedDate)) {
-        const dayAttempts = attemptsByUserDay.get(`${member.user_id}:${day}`) || 0;
-        const points = dayAttempts > 0 ? dayAttempts : 2;
-        total += points;
-        if (day === selectedDate) dayPoints = points;
+    let previousScore = member.initial_points || 0;
+    let penaltyTotal = 0;
+
+    if (joinedOn <= moveDay(selectedDate, -1)) {
+      for (const day of dateRange(joinedOn, moveDay(selectedDate, -1))) {
+        previousScore += attemptsByUserDay.get(`${member.user_id}:${day}`) || 0;
       }
     }
+
+    if (group.penalties_enabled && joinedOn <= penaltyThroughDay) {
+      for (const day of dateRange(joinedOn, penaltyThroughDay)) {
+        for (const g of activeGames) {
+          const hasSubmission = attemptsByUserDayGame.has(`${member.user_id}:${day}:${g.id}`);
+          if (hasSubmission) continue;
+
+          let prevAttempts: number | null = null;
+          let scan = moveDay(day, -1);
+          while (scan >= joinedOn) {
+            const value = attemptsByUserDayGame.get(`${member.user_id}:${scan}:${g.id}`);
+            if (typeof value === "number") {
+              prevAttempts = value;
+              break;
+            }
+            scan = moveDay(scan, -1);
+          }
+
+          penaltyTotal += (prevAttempts ?? g.maxAttempts) + 1;
+        }
+      }
+    }
+
+    previousScore += penaltyTotal;
+    const dayPoints = attemptsByUserDay.get(`${member.user_id}:${selectedDate}`) || 0;
+    const dayGamesCount = (daySubmissions || []).filter((s) => s.user_id === member.user_id).length;
+    const total = previousScore + dayPoints;
+
     rankingData.push({
       userId: member.user_id,
       score: total,
-      previousScore: Math.max(0, total - dayPoints),
+      previousScore: Math.max(0, previousScore),
       dayPoints,
+      dayGamesCount,
       name: displayName(profileMap.get(member.user_id)?.username),
       avatar: profileMap.get(member.user_id)?.avatar_url ?? null,
       role: member.role
@@ -203,7 +294,7 @@ export default async function GroupDetailPage({
     ...r,
     progress: Math.max(8, Math.round(((raceMax - r.score + 1) / (raceMax + 1)) * 100))
   }));
-  const submittedToday = new Set((daySubmissions || []).map((s) => s.user_id));
+  const requiredGames = Math.max(1, (gameTypes || []).length);
 
   const prevDate = moveDay(selectedDate, -1);
   const nextDate = moveDay(selectedDate, 1);
@@ -230,6 +321,15 @@ export default async function GroupDetailPage({
                       : notice === "comment_delete_failed"
                         ? "No se pudo eliminar el comentario."
                 : null;
+  const comments = dayComments || [];
+  const rootComments = comments.filter((c) => !c.parent_comment_id);
+  const childrenByParent = new Map<string, Array<(typeof comments)[number]>>();
+  for (const c of comments) {
+    if (!c.parent_comment_id) continue;
+    const list = childrenByParent.get(c.parent_comment_id) || [];
+    list.push(c);
+    childrenByParent.set(c.parent_comment_id, list);
+  }
 
   return (
     <section className="space-y-4">
@@ -242,9 +342,8 @@ export default async function GroupDetailPage({
               // eslint-disable-next-line @next/next/no-img-element
               <img src={group.icon_url} alt="Icono grupo" className="h-12 w-12 rounded-xl object-cover" />
             ) : (
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-200 text-xs font-semibold text-slate-700">
-                {initials(group.name)}
-              </div>
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src="/default-group-logo.svg" alt="Icono grupo por defecto" className="h-12 w-12 rounded-xl object-cover" />
             )}
             <div>
               <h1 className="title-xl">{group.name}</h1>
@@ -255,8 +354,8 @@ export default async function GroupDetailPage({
           </div>
           <div className="flex items-center gap-2">
             <ShareGroupButton groupCode={group.code} />
-            <Link className="button-ghost inline-flex h-10 w-10 items-center justify-center rounded-full p-0 text-lg" href="/groups" aria-label="Menu" title="Menu">
-              {"\u2630"}
+            <Link className="button-ghost inline-flex h-10 w-10 items-center justify-center rounded-full p-0 text-lg" href="/groups" aria-label="Inicio" title="Inicio">
+              {"\u2302"}
             </Link>
           </div>
         </div>
@@ -274,14 +373,30 @@ export default async function GroupDetailPage({
                 <option value="daily">Modo diario (solo hoy)</option>
                 <option value="history">Modo historial (elegir fecha)</option>
               </select>
-              <button className="button-secondary w-full" type="submit">
+              <SubmitOnceButton className="button-secondary w-full" pendingText="Guardando...">
                 Guardar cambios
-              </button>
+              </SubmitOnceButton>
             </form>
-            <form action={forceRecalc} className="mt-3">
-              <button className="button-secondary w-full" type="submit">
-                Forzar actualizacion de puntuaciones
-              </button>
+            <form action={setPenaltiesEnabled} className="mt-3 rounded-lg border border-slate-200 p-3">
+              <label className="flex items-center justify-between text-sm font-medium">
+                <span>Penalizaciones</span>
+                <input type="checkbox" name="enabled" defaultChecked={group.penalties_enabled} />
+              </label>
+              <SubmitOnceButton className="button-secondary mt-3 w-full" pendingText="Aplicando...">
+                Aplicar
+              </SubmitOnceButton>
+            </form>
+            <form action={setNewMemberStartPoints} className="mt-3 rounded-lg border border-slate-200 p-3">
+              <label className="mb-2 block text-sm font-medium">Puntuacion inicial nuevos miembros</label>
+              <input className="input" name="new_member_start_points" type="number" min={0} step={1} defaultValue={group.new_member_start_points} />
+              <SubmitOnceButton className="button-secondary mt-3 w-full" pendingText="Guardando...">
+                Guardar puntos iniciales
+              </SubmitOnceButton>
+            </form>
+            <form action={resetSeason} className="mt-3">
+              <SubmitOnceButton className="button-secondary w-full border-red-200 bg-red-50 text-red-700 hover:bg-red-100" pendingText="Restaurando...">
+                Restaurar temporada (reset)
+              </SubmitOnceButton>
             </form>
             <div className="mt-3 space-y-2">
               <p className="text-sm font-semibold">Miembros</p>
@@ -291,12 +406,22 @@ export default async function GroupDetailPage({
                     {m.name} {m.role === "owner" ? "(owner)" : ""}
                   </p>
                   {m.role !== "owner" ? (
-                    <form action={kickMember}>
-                      <input type="hidden" name="targetUserId" value={m.userId} />
-                      <button className="button-secondary h-8 px-3 text-xs" type="submit">
-                        Expulsar
-                      </button>
-                    </form>
+                    <div className="flex items-center gap-2">
+                      {isPrimaryOwner ? (
+                        <form action={promoteMember}>
+                          <input type="hidden" name="targetUserId" value={m.userId} />
+                          <SubmitOnceButton className="button-secondary h-8 px-3 text-xs" pendingText="...">
+                            Hacer owner
+                          </SubmitOnceButton>
+                        </form>
+                      ) : null}
+                      <form action={kickMember}>
+                        <input type="hidden" name="targetUserId" value={m.userId} />
+                        <SubmitOnceButton className="button-secondary h-8 px-3 text-xs" pendingText="...">
+                          Expulsar
+                        </SubmitOnceButton>
+                      </form>
+                    </div>
                   ) : null}
                 </div>
               ))}
@@ -307,7 +432,7 @@ export default async function GroupDetailPage({
 
       <div className="panel space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Clasificacion a fecha</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Leaderboard</h2>
           <p className="text-sm font-semibold">{selectedDate}</p>
         </div>
         <div className="space-y-2">
@@ -315,10 +440,14 @@ export default async function GroupDetailPage({
             <div key={r.userId} className="rounded-xl border border-slate-200 bg-white p-2">
               <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
                 <span>{r.name}</span>
-                <span>{r.score} pts</span>
+                <span className="text-sky-700">{r.score} pts</span>
               </div>
-              <div className="relative h-9 rounded-lg bg-slate-100">
-                <div className="absolute left-0 top-0 h-9 rounded-lg bg-sky-500/20" style={{ width: `${r.progress}%` }} />
+              <div
+                className={`relative h-9 rounded-lg ${
+                  r.dayGamesCount === 0 ? "bg-slate-200" : r.dayGamesCount < requiredGames ? "bg-sky-200" : "bg-emerald-200"
+                }`}
+              >
+                <div className="absolute left-0 top-0 h-9 rounded-lg bg-slate-900/10" style={{ width: `${r.progress}%` }} />
                 <div className="absolute top-1/2 -translate-y-1/2" style={{ left: `calc(${r.progress}% - 18px)` }}>
                   {r.avatar ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -329,32 +458,8 @@ export default async function GroupDetailPage({
                     </div>
                   )}
                 </div>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-800">+{r.dayPoints}</div>
               </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="panel">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Leaderboard</h2>
-        <div className="space-y-2">
-          {ranking.map((r, idx) => (
-            <div key={r.userId} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
-              <div className="flex items-center gap-2">
-                <p className="text-sm">
-                  {idx + 1}. {r.name}
-                </p>
-                {submittedToday.has(r.userId) ? (
-                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-xs text-emerald-700" title="Registrado este dia">
-                    ✓
-                  </span>
-                ) : (
-                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-xs text-amber-700" title="Pendiente de registrar hoy">
-                    ◷
-                  </span>
-                )}
-              </div>
-              <p className="font-semibold">{r.score}</p>
             </div>
           ))}
         </div>
@@ -428,31 +533,65 @@ export default async function GroupDetailPage({
             placeholder={`Comenta sobre las jugadas de ${selectedDate}...`}
             required
           />
-          <button className="button-secondary w-full" type="submit">
+          <SubmitOnceButton className="button-secondary w-full" pendingText="Publicando...">
             Publicar comentario
-          </button>
+          </SubmitOnceButton>
         </form>
 
-        {(dayComments || []).length === 0 ? (
+        {comments.length === 0 ? (
           <p className="muted">Aun no hay comentarios en este dia.</p>
         ) : (
           <div className="space-y-2">
-            {dayComments?.map((c) => {
+            {rootComments.map((c) => {
               const author = profileMap.get(c.user_id);
               const authorName = displayName(author?.username);
               const canManage = c.user_id === user.id || isOwner;
+              const replies = childrenByParent.get(c.id) || [];
               return (
-                <CommentItem
-                  key={c.id}
-                  commentId={c.id}
-                  body={c.body}
-                  createdAt={c.created_at}
-                  authorName={authorName}
-                  authorAvatarUrl={author?.avatar_url ?? null}
-                  canManage={canManage}
-                  groupId={group.id}
-                  selectedDate={selectedDate}
-                />
+                <div key={c.id} className="space-y-2">
+                  <CommentItem
+                    commentId={c.id}
+                    body={c.body}
+                    createdAt={c.created_at}
+                    authorName={authorName}
+                    authorAvatarUrl={author?.avatar_url ?? null}
+                    canManage={canManage}
+                    groupId={group.id}
+                    selectedDate={selectedDate}
+                  />
+                  <form action={addComment} className="ml-5 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                    <input type="hidden" name="parentCommentId" value={c.id} />
+                    <textarea
+                      name="body"
+                      maxLength={280}
+                      className="min-h-14 w-full rounded-lg border border-slate-300 p-2 text-sm outline-none focus:border-sky-500"
+                      placeholder="Responder..."
+                      required
+                    />
+                    <SubmitOnceButton className="button-secondary h-8 w-full text-xs" pendingText="Enviando...">
+                      Responder
+                    </SubmitOnceButton>
+                  </form>
+                  {replies.map((r) => {
+                    const replyAuthor = profileMap.get(r.user_id);
+                    const replyAuthorName = displayName(replyAuthor?.username);
+                    const canManageReply = r.user_id === user.id || isOwner;
+                    return (
+                      <CommentItem
+                        key={r.id}
+                        commentId={r.id}
+                        body={r.body}
+                        createdAt={r.created_at}
+                        authorName={replyAuthorName}
+                        authorAvatarUrl={replyAuthor?.avatar_url ?? null}
+                        canManage={canManageReply}
+                        groupId={group.id}
+                        selectedDate={selectedDate}
+                        depth={1}
+                      />
+                    );
+                  })}
+                </div>
               );
             })}
           </div>

@@ -15,6 +15,9 @@ export type Database = {
           code: string;
           icon_url: string | null;
           entry_mode: "daily" | "history";
+          penalties_enabled: boolean;
+          new_member_start_points: number;
+          last_group_recalc_on: string | null;
           owner_id: string;
           created_at: string;
         };
@@ -24,15 +27,26 @@ export type Database = {
           code: string;
           icon_url?: string | null;
           entry_mode?: "daily" | "history";
+          penalties_enabled?: boolean;
+          new_member_start_points?: number;
+          last_group_recalc_on?: string | null;
           owner_id: string;
           created_at?: string;
         };
-        Update: { name?: string; code?: string; icon_url?: string | null; entry_mode?: "daily" | "history" };
+        Update: {
+          name?: string;
+          code?: string;
+          icon_url?: string | null;
+          entry_mode?: "daily" | "history";
+          penalties_enabled?: boolean;
+          new_member_start_points?: number;
+          last_group_recalc_on?: string | null;
+        };
       };
       group_members: {
-        Row: { group_id: string; user_id: string; role: "owner" | "member"; joined_at: string };
-        Insert: { group_id: string; user_id: string; role?: "owner" | "member"; joined_at?: string };
-        Update: { role?: "owner" | "member" };
+        Row: { group_id: string; user_id: string; role: "owner" | "member"; joined_at: string; initial_points: number };
+        Insert: { group_id: string; user_id: string; role?: "owner" | "member"; joined_at?: string; initial_points?: number };
+        Update: { role?: "owner" | "member"; initial_points?: number };
       };
       game_types: {
         Row: { id: number; key: string; label: string; max_attempts: number; active: boolean };
@@ -80,9 +94,25 @@ export type Database = {
         Update: { total_points?: number; calculated_through?: string; updated_at?: string };
       };
       group_comments: {
-        Row: { id: string; group_id: string; user_id: string; comment_date: string; body: string; created_at: string };
-        Insert: { id?: string; group_id: string; user_id: string; comment_date: string; body: string; created_at?: string };
-        Update: { body?: string };
+        Row: {
+          id: string;
+          group_id: string;
+          user_id: string;
+          comment_date: string;
+          body: string;
+          parent_comment_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          group_id: string;
+          user_id: string;
+          comment_date: string;
+          body: string;
+          parent_comment_id?: string | null;
+          created_at?: string;
+        };
+        Update: { body?: string; parent_comment_id?: string | null };
       };
     };
   };

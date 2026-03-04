@@ -12,6 +12,7 @@ type CommentItemProps = {
   canManage: boolean;
   groupId: string;
   selectedDate: string;
+  depth?: number;
 };
 
 export function CommentItem({
@@ -22,7 +23,8 @@ export function CommentItem({
   authorAvatarUrl,
   canManage,
   groupId,
-  selectedDate
+  selectedDate,
+  depth = 0
 }: CommentItemProps) {
   const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);
@@ -62,7 +64,7 @@ export function CommentItem({
   };
 
   const removeComment = async () => {
-    if (!confirm("¿Eliminar este comentario? Esta acción no se puede deshacer.")) return;
+    if (!confirm("Eliminar este comentario? Esta accion no se puede deshacer.")) return;
     setIsDeleting(true);
     const res = await fetch(`/api/comments/${commentId}`, {
       method: "DELETE",
@@ -81,7 +83,7 @@ export function CommentItem({
   };
 
   return (
-    <article className="rounded-xl border border-slate-200 bg-white p-3">
+    <article className="rounded-xl border border-slate-200 bg-white p-3" style={{ marginLeft: `${depth * 20}px` }}>
       <div className="mb-1 flex items-center justify-between">
         <div className="flex items-center gap-2">
           {authorAvatarUrl ? (
@@ -94,9 +96,7 @@ export function CommentItem({
           )}
           <p className="text-sm font-semibold">{authorName}</p>
         </div>
-        <p className="text-xs text-slate-500">
-          {new Date(createdAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
-        </p>
+        <p className="text-xs text-slate-500">{new Date(createdAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}</p>
       </div>
 
       {isEditing ? (
@@ -143,11 +143,7 @@ export function CommentItem({
       {canManage ? (
         <div className="mt-2 flex items-center justify-end gap-1">
           {!isEditing ? (
-            <button
-              type="button"
-              className="h-7 rounded-md px-2 text-xs font-medium text-slate-600 hover:bg-slate-100"
-              onClick={() => setIsEditing(true)}
-            >
+            <button type="button" className="h-7 rounded-md px-2 text-xs font-medium text-slate-600 hover:bg-slate-100" onClick={() => setIsEditing(true)}>
               Editar
             </button>
           ) : null}
