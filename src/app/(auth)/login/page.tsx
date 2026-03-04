@@ -28,7 +28,6 @@ export default async function LoginPage() {
   return (
     <section className="space-y-5">
       <div className="panel space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-sky-600">Wordle Friends</p>
         <h1 className="title-xl">Accede con Google</h1>
         <p className="muted">Login rapido para crear grupos, registrar partidas y comparar ranking diario.</p>
       </div>
