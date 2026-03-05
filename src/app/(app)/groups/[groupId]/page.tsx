@@ -356,6 +356,23 @@ export default async function GroupDetailPage({
     list.push(c);
     childrenByParent.set(c.parent_comment_id, list);
   }
+  type DaySubmission = NonNullable<typeof daySubmissions>[number];
+  const daySubmissionsByUser = new Map<string, DaySubmission[]>();
+  for (const s of daySubmissions || []) {
+    const list = daySubmissionsByUser.get(s.user_id) || [];
+    list.push(s);
+    daySubmissionsByUser.set(s.user_id, list);
+  }
+  const groupedDaySubmissions = [...daySubmissionsByUser.entries()].map(([userId, submissions]) => ({
+    userId,
+    submissions: submissions
+      .slice()
+      .sort((a, b) => {
+        const aLabel = gameTypes?.find((g) => g.id === a.game_type_id)?.label || "";
+        const bLabel = gameTypes?.find((g) => g.id === b.game_type_id)?.label || "";
+        return aLabel.localeCompare(bLabel, "es");
+      })
+  }));
 
   return (
     <section className="space-y-4">
@@ -526,16 +543,15 @@ export default async function GroupDetailPage({
           </div>
         </div>
 
-        {(daySubmissions || []).length === 0 ? (
+        {groupedDaySubmissions.length === 0 ? (
           <p className="muted">No hay resultados para este dia.</p>
         ) : (
           <div className="space-y-3">
-            {daySubmissions?.map((s) => {
-              const gameLabel = gameTypes?.find((g) => g.id === s.game_type_id)?.label || "Juego";
-              const author = profileMap.get(s.user_id);
+            {groupedDaySubmissions.map((entry) => {
+              const author = profileMap.get(entry.userId);
               const authorName = displayName(author?.username);
               return (
-                <article key={s.id} className="rounded-xl border border-slate-200 bg-white p-3">
+                <article key={entry.userId} className="rounded-xl border border-slate-200 bg-white p-3">
                   <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
                     <span className="flex items-center gap-2">
                       {author?.avatar_url ? (
@@ -548,14 +564,24 @@ export default async function GroupDetailPage({
                       )}
                       <span>{authorName}</span>
                     </span>
-                    <span>{gameLabel}</span>
+                    <span>{entry.submissions.length} resultado{entry.submissions.length > 1 ? "s" : ""}</span>
                   </div>
-                  <div className="font-mono text-sm leading-5">
-                    {(s.grid_rows as string[]).map((line: string, i: number) => (
-                      <p key={i}>{line}</p>
-                    ))}
+                  <div className="space-y-3">
+                    {entry.submissions.map((s) => {
+                      const gameLabel = gameTypes?.find((g) => g.id === s.game_type_id)?.label || "Juego";
+                      return (
+                        <div key={s.id} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
+                          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{gameLabel}</p>
+                          <div className="font-mono text-sm leading-5">
+                            {(s.grid_rows as string[]).map((line: string, i: number) => (
+                              <p key={i}>{line}</p>
+                            ))}
+                          </div>
+                          <p className="mt-2 text-sm font-medium">Intentos: {s.attempts}</p>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <p className="mt-2 text-sm font-medium">Intentos: {s.attempts}</p>
                 </article>
               );
             })}
