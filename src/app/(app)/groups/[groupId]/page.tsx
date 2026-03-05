@@ -152,11 +152,14 @@ export default async function GroupDetailPage({
       data: { user: currentUser }
     } = await supabaseServer.auth.getUser();
     if (!currentUser) redirect("/login");
-    await supabaseServer.rpc("set_group_member_initial_points", {
+    const { error } = await supabaseServer.rpc("set_group_member_initial_points", {
       p_group_id: groupId,
       p_user_id: targetUserId,
       p_points: safePoints
     });
+    if (error) {
+      redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_failed`);
+    }
     redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_saved`);
   };
 
@@ -326,6 +329,8 @@ export default async function GroupDetailPage({
         ? "Miembro expulsado del grupo."
         : notice === "settings_saved"
           ? "Configuracion del grupo guardada."
+          : notice === "settings_failed"
+            ? "No se pudo guardar la configuracion."
           : notice === "comment_added"
             ? "Comentario publicado."
             : notice === "comment_empty"
