@@ -70,7 +70,7 @@ export default async function GroupDetailPage({
     { data: gameTypes },
     { data: dayComments }
   ] = await Promise.all([
-    supabase.from("groups").select("id,name,code,icon_url,owner_id,entry_mode,penalties_enabled,new_member_start_points").eq("id", groupId).single(),
+    supabase.from("groups").select("id,name,code,icon_url,owner_id,entry_mode,penalties_enabled").eq("id", groupId).single(),
     supabase.from("submissions").select("user_id,attempts,played_on,game_type_id").eq("group_id", groupId).lte("played_on", selectedDate),
     supabase
       .from("submissions")
@@ -141,16 +141,22 @@ export default async function GroupDetailPage({
     redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_saved`);
   };
 
-  const setNewMemberStartPoints = async (formData: FormData) => {
+  const setMemberInitialPoints = async (formData: FormData) => {
     "use server";
-    const points = Number(formData.get("new_member_start_points") || 0);
+    const targetUserId = String(formData.get("targetUserId") || "");
+    const points = Number(formData.get("initial_points") || 0);
     const safePoints = Number.isFinite(points) ? Math.max(0, Math.trunc(points)) : 0;
+    if (!targetUserId) return;
     const supabaseServer = await createSupabaseServerClient();
     const {
       data: { user: currentUser }
     } = await supabaseServer.auth.getUser();
     if (!currentUser) redirect("/login");
-    await supabaseServer.rpc("set_group_new_member_start_points", { p_group_id: groupId, p_points: safePoints });
+    await supabaseServer.rpc("set_group_member_initial_points", {
+      p_group_id: groupId,
+      p_user_id: targetUserId,
+      p_points: safePoints
+    });
     redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_saved`);
   };
 
@@ -175,6 +181,19 @@ export default async function GroupDetailPage({
     } = await supabaseServer.auth.getUser();
     if (!currentUser) redirect("/login");
     await supabaseServer.rpc("promote_group_member_to_owner", { p_group_id: groupId, p_user_id: targetUserId });
+    redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_saved`);
+  };
+
+  const demoteOwner = async (formData: FormData) => {
+    "use server";
+    const targetUserId = String(formData.get("targetUserId") || "");
+    if (!targetUserId) return;
+    const supabaseServer = await createSupabaseServerClient();
+    const {
+      data: { user: currentUser }
+    } = await supabaseServer.auth.getUser();
+    if (!currentUser) redirect("/login");
+    await supabaseServer.rpc("demote_group_owner_to_member", { p_group_id: groupId, p_user_id: targetUserId });
     redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_saved`);
   };
 
@@ -214,6 +233,7 @@ export default async function GroupDetailPage({
   };
 
   const profileMap = new Map((profiles || []).map((p) => [p.id, p]));
+  const initialPointsByUser = new Map((members || []).map((m) => [m.user_id, m.initial_points || 0]));
   const attemptsByUserDay = new Map<string, number>();
   const attemptsByUserDayGame = new Map<string, number>();
   for (const item of allSubmissions || []) {
@@ -354,8 +374,8 @@ export default async function GroupDetailPage({
           </div>
           <div className="flex items-center gap-2">
             <ShareGroupButton groupCode={group.code} />
-            <Link className="button-ghost inline-flex h-10 w-10 items-center justify-center rounded-full p-0 text-lg" href="/groups" aria-label="Inicio" title="Inicio">
-              {"\u2302"}
+            <Link className="button-secondary h-10 rounded-full px-4" href="/groups" aria-label="Inicio" title="Inicio">
+              Menu
             </Link>
           </div>
         </div>
@@ -386,13 +406,6 @@ export default async function GroupDetailPage({
                 Aplicar
               </SubmitOnceButton>
             </form>
-            <form action={setNewMemberStartPoints} className="mt-3 rounded-lg border border-slate-200 p-3">
-              <label className="mb-2 block text-sm font-medium">Puntuacion inicial nuevos miembros</label>
-              <input className="input" name="new_member_start_points" type="number" min={0} step={1} defaultValue={group.new_member_start_points} />
-              <SubmitOnceButton className="button-secondary mt-3 w-full" pendingText="Guardando...">
-                Guardar puntos iniciales
-              </SubmitOnceButton>
-            </form>
             <form action={resetSeason} className="mt-3">
               <SubmitOnceButton className="button-secondary w-full border-red-200 bg-red-50 text-red-700 hover:bg-red-100" pendingText="Restaurando...">
                 Restaurar temporada (reset)
@@ -402,27 +415,51 @@ export default async function GroupDetailPage({
               <p className="text-sm font-semibold">Miembros</p>
               {ranking.map((m) => (
                 <div key={m.userId} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-                  <p className="text-sm">
-                    {m.name} {m.role === "owner" ? "(owner)" : ""}
-                  </p>
-                  {m.role !== "owner" ? (
-                    <div className="flex items-center gap-2">
-                      {isPrimaryOwner ? (
-                        <form action={promoteMember}>
-                          <input type="hidden" name="targetUserId" value={m.userId} />
-                          <SubmitOnceButton className="button-secondary h-8 px-3 text-xs" pendingText="...">
-                            Hacer owner
-                          </SubmitOnceButton>
-                        </form>
-                      ) : null}
+                  <div>
+                    <p className="text-sm">
+                      {m.name} {m.role === "owner" ? "(owner)" : ""}
+                    </p>
+                    <form action={setMemberInitialPoints} className="mt-2 flex items-center gap-2">
+                      <input type="hidden" name="targetUserId" value={m.userId} />
+                      <input
+                        className="input h-8 w-20"
+                        name="initial_points"
+                        type="number"
+                        min={0}
+                        step={1}
+                        defaultValue={initialPointsByUser.get(m.userId) ?? 0}
+                      />
+                      <SubmitOnceButton className="button-secondary h-8 px-3 text-xs" pendingText="...">
+                        Base
+                      </SubmitOnceButton>
+                    </form>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {m.role !== "owner" && isPrimaryOwner ? (
+                      <form action={promoteMember}>
+                        <input type="hidden" name="targetUserId" value={m.userId} />
+                        <SubmitOnceButton className="button-secondary h-8 px-3 text-xs" pendingText="...">
+                          Hacer owner
+                        </SubmitOnceButton>
+                      </form>
+                    ) : null}
+                    {m.role === "owner" && m.userId !== group.owner_id ? (
+                      <form action={demoteOwner}>
+                        <input type="hidden" name="targetUserId" value={m.userId} />
+                        <SubmitOnceButton className="button-secondary h-8 px-3 text-xs" pendingText="...">
+                          Quitar owner
+                        </SubmitOnceButton>
+                      </form>
+                    ) : null}
+                    {m.userId !== group.owner_id ? (
                       <form action={kickMember}>
                         <input type="hidden" name="targetUserId" value={m.userId} />
                         <SubmitOnceButton className="button-secondary h-8 px-3 text-xs" pendingText="...">
                           Expulsar
                         </SubmitOnceButton>
                       </form>
-                    </div>
-                  ) : null}
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>
@@ -559,19 +596,22 @@ export default async function GroupDetailPage({
                     groupId={group.id}
                     selectedDate={selectedDate}
                   />
-                  <form action={addComment} className="ml-5 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
-                    <input type="hidden" name="parentCommentId" value={c.id} />
-                    <textarea
-                      name="body"
-                      maxLength={280}
-                      className="min-h-14 w-full rounded-lg border border-slate-300 p-2 text-sm outline-none focus:border-sky-500"
-                      placeholder="Responder..."
-                      required
-                    />
-                    <SubmitOnceButton className="button-secondary h-8 w-full text-xs" pendingText="Enviando...">
-                      Responder
-                    </SubmitOnceButton>
-                  </form>
+                  <details className="ml-5 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                    <summary className="cursor-pointer text-xs font-semibold text-slate-600">Responder</summary>
+                    <form action={addComment} className="mt-2 space-y-2">
+                      <input type="hidden" name="parentCommentId" value={c.id} />
+                      <textarea
+                        name="body"
+                        maxLength={280}
+                        className="min-h-14 w-full rounded-lg border border-slate-300 p-2 text-sm outline-none focus:border-sky-500"
+                        placeholder="Escribe tu respuesta..."
+                        required
+                      />
+                      <SubmitOnceButton className="button-secondary h-8 w-full text-xs" pendingText="Enviando...">
+                        Publicar respuesta
+                      </SubmitOnceButton>
+                    </form>
+                  </details>
                   {replies.map((r) => {
                     const replyAuthor = profileMap.get(r.user_id);
                     const replyAuthorName = displayName(replyAuthor?.username);

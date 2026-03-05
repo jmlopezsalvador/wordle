@@ -404,3 +404,131 @@ $$;
 
 revoke all on function public.reset_group_season(uuid) from public;
 grant execute on function public.reset_group_season(uuid) to authenticated;
+
+create or replace function public.join_group_by_code(p_code text)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid;
+  v_group_id uuid;
+begin
+  v_user_id := auth.uid();
+
+  if v_user_id is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  insert into public.profiles (id, username, avatar_url)
+  select
+    u.id,
+    split_part(u.email, '@', 1),
+    u.raw_user_meta_data ->> 'avatar_url'
+  from auth.users u
+  where u.id = v_user_id
+  on conflict (id) do nothing;
+
+  select g.id
+  into v_group_id
+  from public.groups g
+  where upper(g.code) = upper(p_code)
+  limit 1;
+
+  if v_group_id is null then
+    return null;
+  end if;
+
+  insert into public.group_members (group_id, user_id, role, initial_points)
+  values (v_group_id, v_user_id, 'member', 0)
+  on conflict (group_id, user_id) do nothing;
+
+  insert into public.member_scores (group_id, user_id, total_points, calculated_through, updated_at)
+  values (v_group_id, v_user_id, 0, (current_date - interval '1 day')::date, now())
+  on conflict (group_id, user_id) do nothing;
+
+  return v_group_id;
+end;
+$$;
+
+create or replace function public.set_group_member_initial_points(p_group_id uuid, p_user_id uuid, p_points int)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_through date;
+begin
+  if p_points < 0 then
+    raise exception 'Initial points must be >= 0';
+  end if;
+
+  if not exists (
+    select 1
+    from public.group_members gm
+    where gm.group_id = p_group_id
+      and gm.user_id = auth.uid()
+      and gm.role = 'owner'
+  ) then
+    raise exception 'Only owners can set member initial points';
+  end if;
+
+  update public.group_members
+  set initial_points = p_points
+  where group_id = p_group_id
+    and user_id = p_user_id;
+
+  if not found then
+    raise exception 'Member not found';
+  end if;
+
+  v_through := (current_date - interval '1 day')::date;
+  perform public.recalc_member_score(p_group_id, p_user_id, v_through);
+end;
+$$;
+
+revoke all on function public.set_group_member_initial_points(uuid, uuid, int) from public;
+grant execute on function public.set_group_member_initial_points(uuid, uuid, int) to authenticated;
+
+create or replace function public.demote_group_owner_to_member(p_group_id uuid, p_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1
+    from public.group_members gm
+    where gm.group_id = p_group_id
+      and gm.user_id = auth.uid()
+      and gm.role = 'owner'
+  ) then
+    raise exception 'Only owners can demote owners';
+  end if;
+
+  if exists (
+    select 1
+    from public.groups g
+    where g.id = p_group_id
+      and g.owner_id = p_user_id
+  ) then
+    raise exception 'Primary owner cannot be demoted';
+  end if;
+
+  update public.group_members
+  set role = 'member'
+  where group_id = p_group_id
+    and user_id = p_user_id
+    and role = 'owner';
+
+  if not found then
+    raise exception 'Owner member not found';
+  end if;
+end;
+$$;
+
+revoke all on function public.demote_group_owner_to_member(uuid, uuid) from public;
+grant execute on function public.demote_group_owner_to_member(uuid, uuid) to authenticated;
