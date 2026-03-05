@@ -566,11 +566,12 @@ export default async function GroupDetailPage({
                     </span>
                     <span>{entry.submissions.length} resultado{entry.submissions.length > 1 ? "s" : ""}</span>
                   </div>
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
                     {entry.submissions.map((s) => {
                       const gameLabel = gameTypes?.find((g) => g.id === s.game_type_id)?.label || "Juego";
+                      const itemClass = entry.submissions.length === 1 ? "col-span-2" : "";
                       return (
-                        <div key={s.id} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
+                        <div key={s.id} className={`rounded-lg border border-slate-100 bg-slate-50 p-2 ${itemClass}`}>
                           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{gameLabel}</p>
                           <div className="font-mono text-sm leading-5">
                             {(s.grid_rows as string[]).map((line: string, i: number) => (
