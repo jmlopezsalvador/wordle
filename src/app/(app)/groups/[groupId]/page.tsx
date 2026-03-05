@@ -39,10 +39,10 @@ export default async function GroupDetailPage({
   searchParams
 }: {
   params: Promise<{ groupId: string }>;
-  searchParams: Promise<{ date?: string; notice?: string }>;
+  searchParams: Promise<{ date?: string; notice?: string; error?: string }>;
 }) {
   const { groupId } = await params;
-  const { date, notice } = await searchParams;
+  const { date, notice, error } = await searchParams;
   const selectedDate = date || ymd(new Date());
   const supabase = await createSupabaseServerClient();
 
@@ -152,13 +152,14 @@ export default async function GroupDetailPage({
       data: { user: currentUser }
     } = await supabaseServer.auth.getUser();
     if (!currentUser) redirect("/login");
-    const { error } = await supabaseServer.rpc("set_group_member_initial_points", {
+    const { error: rpcError } = await supabaseServer.rpc("set_group_member_initial_points", {
       p_group_id: groupId,
       p_user_id: targetUserId,
       p_points: safePoints
     });
-    if (error) {
-      redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_failed`);
+    if (rpcError) {
+      const reason = encodeURIComponent((rpcError.message || "unknown_error").slice(0, 180));
+      redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_failed&error=${reason}`);
     }
     redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_saved`);
   };
@@ -330,8 +331,8 @@ export default async function GroupDetailPage({
         : notice === "settings_saved"
           ? "Configuracion del grupo guardada."
           : notice === "settings_failed"
-            ? "No se pudo guardar la configuracion."
-          : notice === "comment_added"
+            ? `No se pudo guardar la configuracion${error ? `: ${error}` : "."}`
+            : notice === "comment_added"
             ? "Comentario publicado."
             : notice === "comment_empty"
               ? "Escribe un comentario antes de enviar."
