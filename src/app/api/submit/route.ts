@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { parseShareText } from "@/lib/parseShareText";
+import { getActiveDayISO } from "@/lib/active-day";
 
 export async function POST(request: Request) {
   const formData = await request.formData();
@@ -18,7 +19,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.redirect(new URL(`/submit?groupId=${groupId}`, request.url));
   }
-  const today = new Date().toISOString().slice(0, 10);
+  const activeDay = getActiveDayISO();
 
   const supabase = await createSupabaseServerClient();
   const {
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
     return NextResponse.redirect(new URL("/groups", request.url));
   }
 
-  const playedOn = group.entry_mode === "history" && requestedPlayedOn ? requestedPlayedOn : today;
+  const playedOn = group.entry_mode === "history" && requestedPlayedOn ? (requestedPlayedOn <= activeDay ? requestedPlayedOn : activeDay) : activeDay;
 
   const { data: gameType } = await supabase
     .from("game_types")
@@ -73,7 +74,7 @@ export async function POST(request: Request) {
   await supabase.rpc("recalc_member_score", {
     p_group_id: groupId,
     p_user_id: user.id,
-    p_through: today
+    p_through: activeDay
   });
 
   return NextResponse.redirect(new URL(`/groups/${groupId}`, request.url));

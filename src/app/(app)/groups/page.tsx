@@ -1,22 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { generateGroupCode } from "@/lib/groups";
+import { addDaysToIsoDay, getActiveDayISO } from "@/lib/active-day";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SubmitOnceButton } from "@/components/ui/submit-once-button";
 
 function initials(email: string | null | undefined) {
   const raw = email?.split("@")[0] || "U";
   return raw.slice(0, 2).toUpperCase();
-}
-
-function ymd(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function addDays(isoDay: string, days: number) {
-  const d = new Date(`${isoDay}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return ymd(d);
 }
 
 async function requireUser() {
@@ -135,12 +126,12 @@ export default async function GroupsPage({
     }
   }
 
-  const today = ymd(new Date());
-  const start = addDays(today, -29);
+  const activeDay = getActiveDayISO();
+  const start = addDaysToIsoDay(activeDay, -29);
   const dailyMap = new Map<string, number>();
-  for (let i = 0; i < 30; i += 1) dailyMap.set(addDays(start, i), 0);
+  for (let i = 0; i < 30; i += 1) dailyMap.set(addDaysToIsoDay(start, i), 0);
   for (const row of mySubmissions || []) {
-    if (row.played_on >= start && row.played_on <= today) {
+    if (row.played_on >= start && row.played_on <= activeDay) {
       dailyMap.set(row.played_on, (dailyMap.get(row.played_on) || 0) + row.attempts);
     }
   }

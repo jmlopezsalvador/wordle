@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SubmitOnceButton } from "@/components/ui/submit-once-button";
+import { getActiveDayISO } from "@/lib/active-day";
 
 export default async function SubmitPage({
   searchParams
@@ -18,7 +19,7 @@ export default async function SubmitPage({
   if (!groupId) redirect("/groups");
 
   const { data: group } = await supabase.from("groups").select("id,name,entry_mode").eq("id", groupId).maybeSingle();
-  const today = new Date().toISOString().slice(0, 10);
+  const activeDay = getActiveDayISO();
   const isHistoryMode = group?.entry_mode === "history";
 
   return (
@@ -42,7 +43,7 @@ export default async function SubmitPage({
             <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="playedOn">
               Fecha del resultado
             </label>
-            <input id="playedOn" className="input" type="date" name="playedOn" max={today} defaultValue={today} required />
+            <input id="playedOn" className="input" type="date" name="playedOn" max={activeDay} defaultValue={activeDay} required />
           </div>
         ) : null}
         <textarea

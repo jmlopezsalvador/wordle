@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { addDaysToIsoDay, getActiveDayISO, getLastClosedDayISO } from "@/lib/active-day";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { CommentItem } from "@/components/groups/comment-item";
 import { ShareGroupButton } from "@/components/groups/share-group-button";
@@ -10,9 +11,7 @@ function ymd(date: Date) {
 }
 
 function moveDay(dateText: string, delta: number) {
-  const d = new Date(`${dateText}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + delta);
-  return ymd(d);
+  return addDaysToIsoDay(dateText, delta);
 }
 
 function dateRange(from: string, to: string) {
@@ -43,7 +42,9 @@ export default async function GroupDetailPage({
 }) {
   const { groupId } = await params;
   const { date, notice, error } = await searchParams;
-  const selectedDate = date || ymd(new Date());
+  const activeDay = getActiveDayISO();
+  const lastClosedDay = getLastClosedDayISO();
+  const selectedDate = date || activeDay;
   const supabase = await createSupabaseServerClient();
 
   const {
@@ -257,8 +258,7 @@ export default async function GroupDetailPage({
     previousScore: number;
     dayGamesCount: number;
   }> = [];
-  const yesterday = moveDay(ymd(new Date()), -1);
-  const penaltyThroughDay = selectedDate < yesterday ? selectedDate : yesterday;
+  const penaltyThroughDay = selectedDate < lastClosedDay ? selectedDate : lastClosedDay;
 
   const activeGames = (gameTypes || []).map((g) => ({ id: g.id, maxAttempts: g.max_attempts }));
 
@@ -274,23 +274,31 @@ export default async function GroupDetailPage({
     }
 
     if (group.penalties_enabled && joinedOn <= penaltyThroughDay) {
+      const effectiveByGame = new Map<number, number>();
       for (const day of dateRange(joinedOn, penaltyThroughDay)) {
         for (const g of activeGames) {
-          const hasSubmission = attemptsByUserDayGame.has(`${member.user_id}:${day}:${g.id}`);
-          if (hasSubmission) continue;
-
-          let prevAttempts: number | null = null;
-          let scan = moveDay(day, -1);
-          while (scan >= joinedOn) {
-            const value = attemptsByUserDayGame.get(`${member.user_id}:${scan}:${g.id}`);
-            if (typeof value === "number") {
-              prevAttempts = value;
-              break;
-            }
-            scan = moveDay(scan, -1);
+          const todayByGame = attemptsByUserDayGame.get(`${member.user_id}:${day}:${g.id}`);
+          if (typeof todayByGame === "number") {
+            effectiveByGame.set(g.id, todayByGame);
+            continue;
           }
 
-          penaltyTotal += (prevAttempts ?? g.maxAttempts) + 1;
+          let prevEffective = effectiveByGame.get(g.id);
+          if (typeof prevEffective !== "number") {
+            let scan = moveDay(day, -1);
+            while (scan >= joinedOn) {
+              const value = attemptsByUserDayGame.get(`${member.user_id}:${scan}:${g.id}`);
+              if (typeof value === "number") {
+                prevEffective = value;
+                break;
+              }
+              scan = moveDay(scan, -1);
+            }
+          }
+
+          const penalty = (prevEffective ?? g.maxAttempts) + 1;
+          penaltyTotal += penalty;
+          effectiveByGame.set(g.id, penalty);
         }
       }
     }
@@ -322,7 +330,7 @@ export default async function GroupDetailPage({
 
   const prevDate = moveDay(selectedDate, -1);
   const nextDate = moveDay(selectedDate, 1);
-  const isToday = selectedDate >= ymd(new Date());
+  const isToday = selectedDate >= activeDay;
   const noticeText =
     notice === "recalculated"
       ? "Puntuaciones recalculadas."
