@@ -81,10 +81,11 @@ export async function POST(request: Request) {
   const { data: actorProfile } = await supabase.from("profiles").select("username").eq("id", user.id).maybeSingle();
   const actorName = actorProfile?.username || user.email?.split("@")[0] || "Usuario";
   const gameLabel = gameType.label || parsed.gameRaw || "Juego";
+  const gridText = parsed.gridRows.length > 0 ? `\n\n${parsed.gridRows.join("\n")}` : "";
   await notifyTelegramGroupMembers({
     groupId,
     actorUserId: user.id,
-    text: `Nuevo resultado en ${group.name}:\n${actorName} registró ${gameLabel} (${playedOn}) con ${parsed.attempts} intento(s).`
+    text: `Nuevo resultado en ${group.name}:\n${actorName} registró ${gameLabel} (${playedOn}) con ${parsed.attempts} intento(s).${gridText}`
   });
 
   return NextResponse.redirect(new URL(`/groups/${groupId}`, request.url));
