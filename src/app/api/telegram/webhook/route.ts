@@ -51,7 +51,6 @@ function helpText() {
     "/groups (seleccionar grupo activo)",
     "/ranking",
     "/today",
-    "/submit <share_text>",
     "/comment <texto>",
     "/remind on",
     "/remind off",
@@ -424,38 +423,6 @@ async function handleTodayCommand(admin: ReturnType<typeof createSupabaseAdminCl
   );
 }
 
-async function handleSubmitCommand(admin: ReturnType<typeof createSupabaseAdminClient>, msg: TelegramMessage, text: string) {
-  if (!msg.from) return;
-  const resolved = await requireActiveGroup(admin, msg.from, msg.chat.id, "Para /submit, primero elige grupo activo:");
-  if (!resolved) return;
-  const { appUserId, group } = resolved;
-
-  const payload = text.replace(/^\/submit(?:@\w+)?\s*/i, "").trim();
-  if (!payload) {
-    await sendTelegramMessage(msg.chat.id, "Uso: /submit <share_text>");
-    return;
-  }
-
-  try {
-    parseShareText(payload);
-  } catch {
-    await sendTelegramMessage(msg.chat.id, "No pude parsear ese share text. Pegalo completo.");
-    return;
-  }
-
-  const pendingId = await createPendingAction(admin, msg.from.id, appUserId, group.id, "submit", { shareText: payload });
-  await sendTelegramInlineKeyboardMessage(
-    msg.chat.id,
-    `Vas a guardar resultado en ${group.name}. Confirmas?`,
-    [
-      [
-        { text: "Confirmar", callback_data: `confirm:${pendingId}` },
-        { text: "Cancelar", callback_data: `cancel:${pendingId}` }
-      ]
-    ]
-  );
-}
-
 async function handleCommentCommand(admin: ReturnType<typeof createSupabaseAdminClient>, msg: TelegramMessage, text: string) {
   if (!msg.from) return;
   const resolved = await requireActiveGroup(admin, msg.from, msg.chat.id, "Para /comment, primero elige grupo activo:");
@@ -728,7 +695,7 @@ async function handleMessage(admin: ReturnType<typeof createSupabaseAdminClient>
   }
 
   if (cmd === "/submit") {
-    await handleSubmitCommand(admin, msg, text);
+    await sendTelegramMessage(msg.chat.id, "El comando /submit ya no se usa. Envia directamente el share text y te pedire confirmacion.");
     return;
   }
 

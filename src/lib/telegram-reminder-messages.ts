@@ -1,4 +1,4 @@
-const REMINDER_MESSAGES = [
+﻿const REMINDER_MESSAGES = [
   "¿Te pagan por mirar la pantalla? Sube los {missing} resultados que faltan en {groupName} ({activeDay}), vago.",
   "Deja de rascarte la barriga. Aún debes {missing} resultados de {groupName} para el {activeDay}.",
   "Hola, genio. Te olvidaste de {missing} resultados en {groupName} el {activeDay}. Trabaja un poco, anda.",
@@ -37,6 +37,7 @@ export function buildTelegramReminderMessage(input: {
     .replace("{missing}", String(input.missing))
     .replace("{activeDay}", input.activeDay);
 
-  return `${text}\nEnvia tu share o usa /submit <share_text>.\nGrupo activo: ${input.groupName} (${input.groupCode})`;
+  return `${text}\nEnvia tu share directamente por este chat.\nGrupo activo: ${input.groupName} (${input.groupCode})`;
 }
+
 
