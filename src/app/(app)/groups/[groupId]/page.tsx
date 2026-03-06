@@ -321,10 +321,16 @@ export default async function GroupDetailPage({
   }
 
   const ranking = rankingData.sort((a, b) => a.score - b.score);
-  const raceMax = Math.max(1, ...ranking.map((r) => r.score));
+  const bestScore = ranking.length > 0 ? ranking[0].score : 0;
+  const worstScore = ranking.length > 0 ? ranking[ranking.length - 1].score : 0;
+  const scoreRange = Math.max(1, worstScore - bestScore);
+  const visualMargin = Math.max(1, Math.ceil(scoreRange * 0.2));
+  const visualMin = bestScore - visualMargin;
+  const visualMax = worstScore + visualMargin;
+  const visualSpan = Math.max(1, visualMax - visualMin);
   const raceData = ranking.map((r) => ({
     ...r,
-    progress: Math.max(8, Math.round(((raceMax - r.score + 1) / (raceMax + 1)) * 100))
+    progress: Math.max(8, Math.min(100, Math.round(((visualMax - r.score) / visualSpan) * 100)))
   }));
   const requiredGames = Math.max(1, (gameTypes || []).length);
 
