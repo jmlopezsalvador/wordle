@@ -53,7 +53,7 @@ function helpText() {
     "/today",
     "/submit <share_text>",
     "/comment <texto>",
-    "/remind on [HH:MM]",
+    "/remind on",
     "/remind off",
     "",
     "Nota: para unirte a grupos se usa la app web."
@@ -84,6 +84,35 @@ async function listUserGroups(admin: ReturnType<typeof createSupabaseAdminClient
   return (data || [])
     .map((row) => (Array.isArray(row.groups) ? row.groups[0] : row.groups))
     .filter(Boolean) as UserGroup[];
+}
+
+async function enableDefaultRemindersForAllUserGroups(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  telegramUserId: number,
+  appUserId: string
+) {
+  const groups = await listUserGroups(admin, appUserId);
+  if (groups.length === 0) return groups;
+
+  await Promise.all(
+    groups.map((g) =>
+      admin
+        .from("telegram_group_reminders")
+        .upsert(
+          {
+            telegram_user_id: telegramUserId,
+            group_id: g.id,
+            enabled: true,
+            hour_local: 12,
+            minute_local: 0,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: "telegram_user_id,group_id" }
+        )
+    )
+  );
+
+  return groups;
 }
 
 async function upsertTelegramLinkProfile(admin: ReturnType<typeof createSupabaseAdminClient>, from: TelegramFrom, appUserId: string) {
@@ -300,12 +329,16 @@ async function handleLinkCommand(
   await upsertTelegramLinkProfile(admin, msg.from, linkToken.app_user_id as string);
   await admin.from("telegram_link_tokens").update({ used_at: new Date().toISOString() }).eq("token", token).is("used_at", null);
 
-  const groups = await listUserGroups(admin, linkToken.app_user_id as string);
+  const groups = await enableDefaultRemindersForAllUserGroups(
+    admin,
+    msg.from.id,
+    linkToken.app_user_id as string
+  );
   if (groups.length === 1) {
     await setActiveGroup(admin, msg.from.id, groups[0].id);
   }
 
-  await sendTelegramMessage(msg.chat.id, "Cuenta enlazada correctamente. Usa /groups para elegir grupo activo.");
+  await sendTelegramMessage(msg.chat.id, "Cuenta enlazada correctamente. Recordatorios activados por defecto. Usa /groups para elegir grupo activo.");
 }
 
 async function handleGroupsCommand(admin: ReturnType<typeof createSupabaseAdminClient>, msg: TelegramMessage) {
@@ -455,17 +488,9 @@ async function handleCommentCommand(admin: ReturnType<typeof createSupabaseAdmin
 
 function parseReminderArgs(args: string[]) {
   const mode = (args[0] || "").toLowerCase();
-  const time = (args[1] || "21:00").trim();
-
   if (!mode) return null;
-
-  const parts = time.split(":");
-  if (parts.length !== 2) return null;
-  const hour = Number(parts[0]);
-  const minute = Number(parts[1]);
-  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
-
-  return { mode, hour, minute };
+  if (mode !== "on" && mode !== "off") return null;
+  return { mode };
 }
 
 async function handleRemindCommand(admin: ReturnType<typeof createSupabaseAdminClient>, msg: TelegramMessage, args: string[]) {
@@ -476,7 +501,7 @@ async function handleRemindCommand(admin: ReturnType<typeof createSupabaseAdminC
 
   const parsed = parseReminderArgs(args);
   if (!parsed) {
-    await sendTelegramMessage(msg.chat.id, "Uso: /remind on [HH:MM] o /remind off");
+    await sendTelegramMessage(msg.chat.id, "Uso: /remind on o /remind off");
     return;
   }
 
@@ -497,7 +522,7 @@ async function handleRemindCommand(admin: ReturnType<typeof createSupabaseAdminC
   }
 
   if (parsed.mode !== "on") {
-    await sendTelegramMessage(msg.chat.id, "Uso: /remind on [HH:MM] o /remind off");
+    await sendTelegramMessage(msg.chat.id, "Uso: /remind on o /remind off");
     return;
   }
 
@@ -508,14 +533,14 @@ async function handleRemindCommand(admin: ReturnType<typeof createSupabaseAdminC
         telegram_user_id: msg.from.id,
         group_id: group.id,
         enabled: true,
-        hour_local: parsed.hour,
-        minute_local: parsed.minute,
+        hour_local: 12,
+        minute_local: 0,
         updated_at: new Date().toISOString()
       },
       { onConflict: "telegram_user_id,group_id" }
     );
 
-  await sendTelegramMessage(msg.chat.id, `Recordatorio activado para ${group.name} a las ${String(parsed.hour).padStart(2, "0")}:${String(parsed.minute).padStart(2, "0")} (Madrid).`);
+  await sendTelegramMessage(msg.chat.id, `Recordatorio activado para ${group.name}. Se avisara a las 12:00 y 20:00 (Madrid).`);
 }
 
 async function handleImplicitShareText(admin: ReturnType<typeof createSupabaseAdminClient>, msg: TelegramMessage, text: string) {
@@ -534,7 +559,7 @@ async function handleImplicitShareText(admin: ReturnType<typeof createSupabaseAd
   const pendingId = await createPendingAction(admin, msg.from.id, appUserId, group.id, "submit", { shareText: text });
   await sendTelegramInlineKeyboardMessage(
     msg.chat.id,
-    `Detecte un share text. Guardarlo en ${group.name}?`,
+    `¿Quieres insertar el resultado en ${group.name}?`,
     [
       [
         { text: "Confirmar", callback_data: `confirm:${pendingId}` },
@@ -747,3 +772,4 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true, activeDay: getActiveDayISO(), closedDay: getLastClosedDayISO() });
 }
+

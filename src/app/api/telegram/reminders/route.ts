@@ -1,5 +1,6 @@
 ﻿import { NextResponse } from "next/server";
 import { getActiveDayISO } from "@/lib/active-day";
+import { buildTelegramReminderMessage } from "@/lib/telegram-reminder-messages";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { sendTelegramMessage } from "@/lib/telegram";
 
@@ -15,9 +16,11 @@ function getMadridTimeParts(now: Date) {
   return { hour: Number(get("hour")), minute: Number(get("minute")) };
 }
 
+const FIXED_REMINDER_HOURS = new Set([12, 20]);
+
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization") || "";
-  const expected = process.env.TELEGRAM_CRON_SECRET || "";
+  const expected = process.env.TELEGRAM_CRON_SECRET || process.env.CRON_SECRET || "";
 
   if (!expected || auth !== `Bearer ${expected}`) {
     return NextResponse.json({ ok: false }, { status: 401 });
@@ -26,13 +29,16 @@ export async function GET(req: Request) {
   const admin = createSupabaseAdminClient();
   const { hour, minute } = getMadridTimeParts(new Date());
   const activeDay = getActiveDayISO();
+  const shouldRunNow = minute === 0 && FIXED_REMINDER_HOURS.has(hour);
+
+  if (!shouldRunNow) {
+    return NextResponse.json({ ok: true, skipped: true, hour, minute, activeDay });
+  }
 
   const { data: reminders } = await admin
     .from("telegram_group_reminders")
     .select("telegram_user_id,group_id")
-    .eq("enabled", true)
-    .eq("hour_local", hour)
-    .eq("minute_local", minute);
+    .eq("enabled", true);
 
   let sent = 0;
 
@@ -62,7 +68,12 @@ export async function GET(req: Request) {
 
     await sendTelegramMessage(
       reminder.telegram_user_id,
-      `Recordatorio ${group.name}: te faltan ${required - done} resultado(s) para ${activeDay}. Envia tu share o usa /submit ${group.code} <share_text>.`
+      buildTelegramReminderMessage({
+        groupName: group.name,
+        missing: required - done,
+        activeDay,
+        groupCode: group.code
+      })
     );
     sent += 1;
   }

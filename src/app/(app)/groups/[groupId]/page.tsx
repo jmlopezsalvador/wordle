@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { addDaysToIsoDay, getActiveDayISO, getLastClosedDayISO } from "@/lib/active-day";
+import { notifyTelegramGroupMembers } from "@/lib/telegram-group-notify";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { CommentItem } from "@/components/groups/comment-item";
 import { ShareGroupButton } from "@/components/groups/share-group-button";
@@ -232,6 +233,15 @@ export default async function GroupDetailPage({
       comment_date: selectedDate,
       body,
       parent_comment_id: parentCommentId || null
+    });
+
+    const { data: actorProfile } = await supabaseServer.from("profiles").select("username").eq("id", currentUser.id).maybeSingle();
+    const actorName = actorProfile?.username || currentUser.email?.split("@")[0] || "Usuario";
+    const kind = parentCommentId ? "respuesta" : "comentario";
+    await notifyTelegramGroupMembers({
+      groupId,
+      actorUserId: currentUser.id,
+      text: `Nueva ${kind} en ${group.name} (${selectedDate}):\n${actorName}: ${body}`
     });
 
     redirect(`/groups/${groupId}?date=${selectedDate}&notice=comment_added`);
