@@ -30,8 +30,18 @@ export function parseShareText(input: string): ParsedShare {
     throw new Error("Texto vacio.");
   }
 
-  const headerMatch = lines[0].match(HEADER_REGEX);
-  if (!headerMatch?.groups) {
+  let headerIndex = -1;
+  let headerMatch: RegExpMatchArray | null = null;
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = lines[i].match(HEADER_REGEX);
+    if (m?.groups) {
+      headerIndex = i;
+      headerMatch = m;
+      break;
+    }
+  }
+
+  if (!headerMatch?.groups || headerIndex < 0) {
     throw new Error("Formato invalido. Cabecera no reconocida.");
   }
 
@@ -52,7 +62,7 @@ export function parseShareText(input: string): ParsedShare {
     throw new Error("Intentos fuera de rango.");
   }
 
-  const gridRows = lines.slice(1).filter((line) => GRID_LINE_REGEX.test(line));
+  const gridRows = lines.slice(headerIndex + 1).filter((line) => GRID_LINE_REGEX.test(line));
   if (gridRows.length === 0) {
     throw new Error("No se detecto cuadricula de emojis.");
   }
