@@ -22,9 +22,9 @@ async function requireUser() {
 export default async function GroupsPage({
   searchParams
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; tg_link?: string; tg_notice?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, tg_link: tgLink, tg_notice: tgNotice } = await searchParams;
   const { supabase, user } = await requireUser();
 
   const signOut = async () => {
@@ -82,6 +82,35 @@ export default async function GroupsPage({
       redirect("/groups?error=invalid_code");
     }
     redirect(`/groups/${groupId}`);
+  };
+
+  const createTelegramLinkToken = async () => {
+    "use server";
+    const supabaseServer = await createSupabaseServerClient();
+    const {
+      data: { user: currentUser }
+    } = await supabaseServer.auth.getUser();
+    if (!currentUser) redirect("/login");
+
+    const username = currentUser.email?.split("@")[0] || "usuario";
+    await supabaseServer.from("profiles").upsert(
+      {
+        id: currentUser.id,
+        username,
+        avatar_url: (currentUser.user_metadata?.avatar_url as string | undefined) || null
+      },
+      { onConflict: "id" }
+    );
+
+    const token = crypto.randomUUID().replace(/-/g, "");
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    await supabaseServer.from("telegram_link_tokens").insert({
+      token,
+      app_user_id: currentUser.id,
+      expires_at: expiresAt
+    });
+
+    redirect(`/groups?tg_link=${token}`);
   };
 
   const [{ data: myProfile }, { data: memberships }, { data: mySubmissions }] = await Promise.all([
@@ -166,6 +195,17 @@ export default async function GroupsPage({
       {alertMessage ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{alertMessage}</div>
       ) : null}
+      {tgNotice === "expired" ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          El token de Telegram expiro. Genera uno nuevo.
+        </div>
+      ) : null}
+      {tgLink ? (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+          Token Telegram generado (15 min): <span className="font-mono font-semibold">{tgLink}</span>. En Telegram:{" "}
+          <span className="font-mono">/link {tgLink}</span>
+        </div>
+      ) : null}
 
       <div className="panel space-y-3">
         <div className="grid grid-cols-2 gap-3">
@@ -222,6 +262,15 @@ export default async function GroupsPage({
       <details className="panel">
         <summary className="cursor-pointer select-none text-sm font-semibold">Acciones de grupo</summary>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <form className="space-y-3 rounded-xl border border-slate-200 bg-white p-3" action={createTelegramLinkToken}>
+            <h3 className="text-sm font-semibold">Telegram bot</h3>
+            <p className="text-xs text-slate-600">
+              Genera un token temporal para vincular tu cuenta con el bot. Luego usa /link en Telegram.
+            </p>
+            <SubmitOnceButton className="button-secondary w-full" pendingText="Generando...">
+              Generar token de enlace
+            </SubmitOnceButton>
+          </form>
           <form className="space-y-3 rounded-xl border border-slate-200 bg-white p-3" action={createGroup}>
             <h3 className="text-sm font-semibold">Crear grupo</h3>
             <input className="input" name="name" placeholder="Nombre del grupo" required />
