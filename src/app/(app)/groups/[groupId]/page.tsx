@@ -265,6 +265,7 @@ export default async function GroupDetailPage({
     avatar: string | null;
     role: string;
     dayPoints: number;
+    dayPenaltyPoints: number;
     previousScore: number;
     dayGamesCount: number;
     dayPenaltyApplied: boolean;
@@ -277,6 +278,7 @@ export default async function GroupDetailPage({
     const joinedOn = ymd(new Date(member.joined_at));
     let previousScore = member.initial_points || 0;
     let penaltyTotal = 0;
+    let dayPenaltyPoints = 0;
     let dayPenaltyApplied = false;
 
     if (joinedOn <= moveDay(selectedDate, -1)) {
@@ -313,6 +315,10 @@ export default async function GroupDetailPage({
           const penalty = (prevEffective ?? g.maxAttempts) + 1;
           penaltyTotal += penalty;
           effectiveByGame.set(g.id, penalty);
+
+          if (day === selectedDate) {
+            dayPenaltyPoints += penalty;
+          }
         }
 
         if (day === selectedDate && missingAnyGameForDay) {
@@ -331,6 +337,7 @@ export default async function GroupDetailPage({
       score: total,
       previousScore: Math.max(0, previousScore),
       dayPoints,
+      dayPenaltyPoints,
       dayGamesCount,
       dayPenaltyApplied,
       name: displayName(profileMap.get(member.user_id)?.username),
@@ -530,6 +537,13 @@ export default async function GroupDetailPage({
         </div>
         <div className="space-y-2">
           {raceData.map((r) => (
+            // Show daily contribution as +X (normal) or +X+P when penalty was applied.
+            // X = submissions of selected day, P = penalties generated for selected day.
+            // Example: +0+5 means no submission but 5 penalty points were added.
+            // This mirrors the effective score delta for the day.
+            (() => {
+              const dayDeltaLabel = r.dayPenaltyPoints > 0 ? `${r.dayPoints}+${r.dayPenaltyPoints}` : `${r.dayPoints}`;
+              return (
             <div key={r.userId} className="rounded-xl border border-slate-200 bg-white p-2">
               <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
                 <span>{r.name}</span>
@@ -557,9 +571,11 @@ export default async function GroupDetailPage({
                     </div>
                   )}
                 </div>
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-800">+{r.dayPoints}</div>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-800">+{dayDeltaLabel}</div>
               </div>
             </div>
+              );
+            })()
           ))}
         </div>
       </div>
