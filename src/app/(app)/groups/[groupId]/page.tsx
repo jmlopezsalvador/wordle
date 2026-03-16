@@ -267,6 +267,7 @@ export default async function GroupDetailPage({
     dayPoints: number;
     previousScore: number;
     dayGamesCount: number;
+    dayPenaltyApplied: boolean;
   }> = [];
   const penaltyThroughDay = selectedDate < lastClosedDay ? selectedDate : lastClosedDay;
 
@@ -276,6 +277,7 @@ export default async function GroupDetailPage({
     const joinedOn = ymd(new Date(member.joined_at));
     let previousScore = member.initial_points || 0;
     let penaltyTotal = 0;
+    let dayPenaltyApplied = false;
 
     if (joinedOn <= moveDay(selectedDate, -1)) {
       for (const day of dateRange(joinedOn, moveDay(selectedDate, -1))) {
@@ -286,12 +288,14 @@ export default async function GroupDetailPage({
     if (group.penalties_enabled && joinedOn <= penaltyThroughDay) {
       const effectiveByGame = new Map<number, number>();
       for (const day of dateRange(joinedOn, penaltyThroughDay)) {
+        let missingAnyGameForDay = false;
         for (const g of activeGames) {
           const todayByGame = attemptsByUserDayGame.get(`${member.user_id}:${day}:${g.id}`);
           if (typeof todayByGame === "number") {
             effectiveByGame.set(g.id, todayByGame);
             continue;
           }
+          missingAnyGameForDay = true;
 
           let prevEffective = effectiveByGame.get(g.id);
           if (typeof prevEffective !== "number") {
@@ -310,6 +314,10 @@ export default async function GroupDetailPage({
           penaltyTotal += penalty;
           effectiveByGame.set(g.id, penalty);
         }
+
+        if (day === selectedDate && missingAnyGameForDay) {
+          dayPenaltyApplied = true;
+        }
       }
     }
 
@@ -324,6 +332,7 @@ export default async function GroupDetailPage({
       previousScore: Math.max(0, previousScore),
       dayPoints,
       dayGamesCount,
+      dayPenaltyApplied,
       name: displayName(profileMap.get(member.user_id)?.username),
       avatar: profileMap.get(member.user_id)?.avatar_url ?? null,
       role: member.role
@@ -528,7 +537,13 @@ export default async function GroupDetailPage({
               </div>
               <div
                 className={`relative h-9 rounded-lg ${
-                  r.dayGamesCount === 0 ? "bg-slate-200" : r.dayGamesCount < requiredGames ? "bg-sky-200" : "bg-emerald-200"
+                  r.dayPenaltyApplied
+                    ? "bg-rose-300"
+                    : r.dayGamesCount === 0
+                      ? "bg-slate-200"
+                      : r.dayGamesCount < requiredGames
+                        ? "bg-sky-200"
+                        : "bg-emerald-200"
                 }`}
               >
                 <div className="absolute left-0 top-0 h-9 rounded-lg bg-slate-900/10" style={{ width: `${r.progress}%` }} />
