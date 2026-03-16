@@ -273,6 +273,50 @@ export default async function GroupDetailPage({
   const penaltyThroughDay = selectedDate < lastClosedDay ? selectedDate : lastClosedDay;
 
   const activeGames = (gameTypes || []).map((g) => ({ id: g.id, maxAttempts: g.max_attempts }));
+  const penaltyDaysForCurrentUser: Array<{ day: string; penaltyPoints: number; missingGames: number }> = [];
+
+  const currentMember = (members || []).find((m) => m.user_id === user.id);
+  if (group.penalties_enabled && currentMember && currentMember.joined_at) {
+    const joinedOn = ymd(new Date(currentMember.joined_at));
+    if (joinedOn <= penaltyThroughDay) {
+      const effectiveByGame = new Map<number, number>();
+      for (const day of dateRange(joinedOn, penaltyThroughDay)) {
+        let dayPenaltyPoints = 0;
+        let missingGames = 0;
+
+        for (const g of activeGames) {
+          const todayByGame = attemptsByUserDayGame.get(`${user.id}:${day}:${g.id}`);
+          if (typeof todayByGame === "number") {
+            effectiveByGame.set(g.id, todayByGame);
+            continue;
+          }
+
+          missingGames += 1;
+
+          let prevEffective = effectiveByGame.get(g.id);
+          if (typeof prevEffective !== "number") {
+            let scan = moveDay(day, -1);
+            while (scan >= joinedOn) {
+              const value = attemptsByUserDayGame.get(`${user.id}:${scan}:${g.id}`);
+              if (typeof value === "number") {
+                prevEffective = value;
+                break;
+              }
+              scan = moveDay(scan, -1);
+            }
+          }
+
+          const penalty = (prevEffective ?? g.maxAttempts) + 1;
+          dayPenaltyPoints += penalty;
+          effectiveByGame.set(g.id, penalty);
+        }
+
+        if (dayPenaltyPoints > 0) {
+          penaltyDaysForCurrentUser.push({ day, penaltyPoints: dayPenaltyPoints, missingGames });
+        }
+      }
+    }
+  }
 
   for (const member of members || []) {
     const joinedOn = ymd(new Date(member.joined_at));
@@ -578,6 +622,33 @@ export default async function GroupDetailPage({
             })()
           ))}
         </div>
+      </div>
+
+      <div className="panel space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Tus penalizaciones</h2>
+          <p className="text-xs text-slate-500">Hasta {penaltyThroughDay}</p>
+        </div>
+        {!group.penalties_enabled ? (
+          <p className="muted">Las penalizaciones estan desactivadas en este grupo.</p>
+        ) : penaltyDaysForCurrentUser.length === 0 ? (
+          <p className="muted">No tienes dias con penalizacion en el rango actual.</p>
+        ) : (
+          <div className="space-y-2">
+            {penaltyDaysForCurrentUser
+              .slice()
+              .reverse()
+              .map((p) => (
+                <div key={p.day} className="flex items-center justify-between rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
+                  <div>
+                    <p className="text-sm font-semibold text-rose-800">{p.day}</p>
+                    <p className="text-xs text-rose-700">Faltaron {p.missingGames} juego(s)</p>
+                  </div>
+                  <p className="text-sm font-semibold text-rose-800">+{p.penaltyPoints} penalizacion</p>
+                </div>
+              ))}
+          </div>
+        )}
       </div>
 
       <div className="panel space-y-3">
