@@ -70,6 +70,8 @@ export default async function GroupDetailPage({
     { data: members },
     { data: profiles },
     { data: gameTypes },
+    { data: allCorrections },
+    { data: dayCorrections },
     { data: dayComments }
   ] = await Promise.all([
     supabase.from("groups").select("id,name,code,icon_url,owner_id,entry_mode,penalties_enabled").eq("id", groupId).single(),
@@ -83,6 +85,16 @@ export default async function GroupDetailPage({
     supabase.from("group_members").select("user_id,role,joined_at,initial_points").eq("group_id", groupId),
     supabase.from("profiles").select("id,username,avatar_url"),
     supabase.from("game_types").select("id,label,max_attempts").eq("active", true),
+    supabase
+      .from("group_member_day_corrections")
+      .select("user_id,played_on,game_type_id,effective_attempts,reason")
+      .eq("group_id", groupId)
+      .lte("played_on", selectedDate),
+    supabase
+      .from("group_member_day_corrections")
+      .select("user_id,played_on,game_type_id,effective_attempts,reason")
+      .eq("group_id", groupId)
+      .eq("played_on", selectedDate),
     supabase
       .from("group_comments")
       .select("id,user_id,body,created_at,parent_comment_id")
@@ -162,6 +174,63 @@ export default async function GroupDetailPage({
     if (rpcError) {
       const reason = encodeURIComponent((rpcError.message || "unknown_error").slice(0, 180));
       redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_failed&error=${reason}`);
+    }
+    redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_saved`);
+  };
+
+  const setMemberDayCorrection = async (formData: FormData) => {
+    "use server";
+    const targetUserId = String(formData.get("targetUserId") || "");
+    const playedOn = String(formData.get("played_on") || "").trim();
+    const gameTypeId = Number(formData.get("game_type_id") || 0);
+    const effectiveAttemptsRaw = Number(formData.get("effective_attempts") || 0);
+    const reason = String(formData.get("reason") || "").trim();
+    if (!targetUserId || !playedOn || !Number.isFinite(gameTypeId)) return;
+
+    const effectiveAttempts = Number.isFinite(effectiveAttemptsRaw) ? Math.max(0, Math.trunc(effectiveAttemptsRaw)) : 0;
+    const supabaseServer = await createSupabaseServerClient();
+    const {
+      data: { user: currentUser }
+    } = await supabaseServer.auth.getUser();
+    if (!currentUser) redirect("/login");
+
+    const { error: rpcError } = await supabaseServer.rpc("set_group_member_day_correction", {
+      p_group_id: groupId,
+      p_user_id: targetUserId,
+      p_played_on: playedOn,
+      p_game_type_id: gameTypeId,
+      p_effective_attempts: effectiveAttempts,
+      p_reason: reason || null
+    });
+    if (rpcError) {
+      const reasonText = encodeURIComponent((rpcError.message || "unknown_error").slice(0, 180));
+      redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_failed&error=${reasonText}`);
+    }
+    redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_saved`);
+  };
+
+  const clearMemberDayCorrection = async (formData: FormData) => {
+    "use server";
+    const targetUserId = String(formData.get("targetUserId") || "");
+    const playedOn = String(formData.get("played_on") || "").trim();
+    const gameTypeId = Number(formData.get("game_type_id") || 0);
+    if (!targetUserId || !playedOn || !Number.isFinite(gameTypeId)) return;
+
+    const supabaseServer = await createSupabaseServerClient();
+    const {
+      data: { user: currentUser }
+    } = await supabaseServer.auth.getUser();
+    if (!currentUser) redirect("/login");
+
+    const { error: rpcError } = await supabaseServer.rpc("clear_group_member_day_correction", {
+      p_group_id: groupId,
+      p_user_id: targetUserId,
+      p_played_on: playedOn,
+      p_game_type_id: gameTypeId
+    });
+    if (rpcError) {
+      const reasonText = encodeURIComponent((rpcError.message || "unknown_error").slice(0, 180));
+      redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_failed&error=${reasonText}`);
     }
     redirect(`/groups/${groupId}?date=${selectedDate}&notice=settings_saved`);
   };
@@ -249,13 +318,21 @@ export default async function GroupDetailPage({
 
   const profileMap = new Map((profiles || []).map((p) => [p.id, p]));
   const initialPointsByUser = new Map((members || []).map((m) => [m.user_id, m.initial_points || 0]));
-  const attemptsByUserDay = new Map<string, number>();
   const attemptsByUserDayGame = new Map<string, number>();
   for (const item of allSubmissions || []) {
-    const key = `${item.user_id}:${item.played_on}`;
-    attemptsByUserDay.set(key, (attemptsByUserDay.get(key) || 0) + item.attempts);
     const keyByGame = `${item.user_id}:${item.played_on}:${item.game_type_id}`;
     attemptsByUserDayGame.set(keyByGame, item.attempts);
+  }
+  const correctionsByUserDayGame = new Map<string, { attempts: number; reason: string | null }>();
+  for (const c of allCorrections || []) {
+    const key = `${c.user_id}:${c.played_on}:${c.game_type_id}`;
+    correctionsByUserDayGame.set(key, { attempts: c.effective_attempts, reason: c.reason || null });
+  }
+  const dayCorrectionsByUser = new Map<string, Array<{ gameTypeId: number; attempts: number; reason: string | null }>>();
+  for (const c of dayCorrections || []) {
+    const list = dayCorrectionsByUser.get(c.user_id) || [];
+    list.push({ gameTypeId: c.game_type_id, attempts: c.effective_attempts, reason: c.reason || null });
+    dayCorrectionsByUser.set(c.user_id, list);
   }
 
   const rankingData: Array<{
@@ -285,7 +362,15 @@ export default async function GroupDetailPage({
         let missingGames = 0;
 
         for (const g of activeGames) {
-          const todayByGame = attemptsByUserDayGame.get(`${user.id}:${day}:${g.id}`);
+          const key = `${user.id}:${day}:${g.id}`;
+          const dayCorrection = correctionsByUserDayGame.get(key);
+          const todayByGame = attemptsByUserDayGame.get(key);
+
+          if (dayCorrection) {
+            effectiveByGame.set(g.id, dayCorrection.attempts);
+            continue;
+          }
+
           if (typeof todayByGame === "number") {
             effectiveByGame.set(g.id, todayByGame);
             continue;
@@ -297,7 +382,13 @@ export default async function GroupDetailPage({
           if (typeof prevEffective !== "number") {
             let scan = moveDay(day, -1);
             while (scan >= joinedOn) {
-              const value = attemptsByUserDayGame.get(`${user.id}:${scan}:${g.id}`);
+              const prevKey = `${user.id}:${scan}:${g.id}`;
+              const prevCorrection = correctionsByUserDayGame.get(prevKey);
+              const value = attemptsByUserDayGame.get(prevKey);
+              if (prevCorrection) {
+                prevEffective = prevCorrection.attempts;
+                break;
+              }
               if (typeof value === "number") {
                 prevEffective = value;
                 break;
@@ -321,35 +412,53 @@ export default async function GroupDetailPage({
   for (const member of members || []) {
     const joinedOn = ymd(new Date(member.joined_at));
     let previousScore = member.initial_points || 0;
-    let penaltyTotal = 0;
     let dayPenaltyPoints = 0;
     let dayPenaltyApplied = false;
+    let dayPoints = 0;
+    let dayGamesCount = 0;
+    const effectiveByGame = new Map<number, number>();
+    const allDays = joinedOn <= selectedDate ? dateRange(joinedOn, selectedDate) : [];
 
-    if (joinedOn <= moveDay(selectedDate, -1)) {
-      for (const day of dateRange(joinedOn, moveDay(selectedDate, -1))) {
-        previousScore += attemptsByUserDay.get(`${member.user_id}:${day}`) || 0;
-      }
-    }
+    for (const day of allDays) {
+      let dayNonPenalty = 0;
+      let dayPenalty = 0;
+      let dayCoveredGames = 0;
 
-    if (group.penalties_enabled && joinedOn <= penaltyThroughDay) {
-      const effectiveByGame = new Map<number, number>();
-      for (const day of dateRange(joinedOn, penaltyThroughDay)) {
-        let missingAnyGameForDay = false;
-        for (const g of activeGames) {
-          const todayByGame = attemptsByUserDayGame.get(`${member.user_id}:${day}:${g.id}`);
-          if (typeof todayByGame === "number") {
-            effectiveByGame.set(g.id, todayByGame);
-            continue;
-          }
-          missingAnyGameForDay = true;
+      for (const g of activeGames) {
+        const key = `${member.user_id}:${day}:${g.id}`;
+        const correction = correctionsByUserDayGame.get(key);
+        const submission = attemptsByUserDayGame.get(key);
 
+        if (correction) {
+          previousScore += correction.attempts;
+          dayNonPenalty += correction.attempts;
+          dayCoveredGames += 1;
+          effectiveByGame.set(g.id, correction.attempts);
+          continue;
+        }
+
+        if (typeof submission === "number") {
+          previousScore += submission;
+          dayNonPenalty += submission;
+          dayCoveredGames += 1;
+          effectiveByGame.set(g.id, submission);
+          continue;
+        }
+
+        if (group.penalties_enabled && day <= penaltyThroughDay) {
           let prevEffective = effectiveByGame.get(g.id);
           if (typeof prevEffective !== "number") {
             let scan = moveDay(day, -1);
             while (scan >= joinedOn) {
-              const value = attemptsByUserDayGame.get(`${member.user_id}:${scan}:${g.id}`);
-              if (typeof value === "number") {
-                prevEffective = value;
+              const prevKey = `${member.user_id}:${scan}:${g.id}`;
+              const prevCorrection = correctionsByUserDayGame.get(prevKey);
+              const prevSubmission = attemptsByUserDayGame.get(prevKey);
+              if (prevCorrection) {
+                prevEffective = prevCorrection.attempts;
+                break;
+              }
+              if (typeof prevSubmission === "number") {
+                prevEffective = prevSubmission;
                 break;
               }
               scan = moveDay(scan, -1);
@@ -357,24 +466,21 @@ export default async function GroupDetailPage({
           }
 
           const penalty = (prevEffective ?? g.maxAttempts) + 1;
-          penaltyTotal += penalty;
+          previousScore += penalty;
+          dayPenalty += penalty;
           effectiveByGame.set(g.id, penalty);
-
-          if (day === selectedDate) {
-            dayPenaltyPoints += penalty;
-          }
         }
+      }
 
-        if (day === selectedDate && missingAnyGameForDay) {
-          dayPenaltyApplied = true;
-        }
+      if (day === selectedDate) {
+        dayPoints = dayNonPenalty;
+        dayPenaltyPoints = dayPenalty;
+        dayGamesCount = dayCoveredGames;
+        dayPenaltyApplied = dayPenalty > 0;
       }
     }
 
-    previousScore += penaltyTotal;
-    const dayPoints = attemptsByUserDay.get(`${member.user_id}:${selectedDate}`) || 0;
-    const dayGamesCount = (daySubmissions || []).filter((s) => s.user_id === member.user_id).length;
-    const total = previousScore + dayPoints;
+    const total = previousScore;
 
     rankingData.push({
       userId: member.user_id,
@@ -540,6 +646,41 @@ export default async function GroupDetailPage({
                         Base
                       </SubmitOnceButton>
                     </form>
+                    <form action={setMemberDayCorrection} className="mt-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-2">
+                      <input type="hidden" name="targetUserId" value={m.userId} />
+                      <input type="hidden" name="played_on" value={selectedDate} />
+                      <p className="text-xs font-semibold text-amber-800">Correccion ({selectedDate})</p>
+                      <div className="flex items-center gap-2">
+                        <select className="input h-8 min-w-28" name="game_type_id" defaultValue={String(gameTypes?.[0]?.id || "")} required>
+                          {(gameTypes || []).map((g) => (
+                            <option key={g.id} value={g.id}>
+                              {g.label}
+                            </option>
+                          ))}
+                        </select>
+                        <input className="input h-8 w-20" name="effective_attempts" type="number" min={0} step={1} placeholder="Pts" required />
+                      </div>
+                      <input className="input h-8 w-full" name="reason" placeholder="Motivo (opcional)" />
+                      <SubmitOnceButton className="button-secondary h-8 w-full text-xs" pendingText="...">
+                        Guardar correccion
+                      </SubmitOnceButton>
+                    </form>
+                    {(dayCorrectionsByUser.get(m.userId) || []).map((c) => {
+                      const gameLabel = gameTypes?.find((g) => g.id === c.gameTypeId)?.label || "Juego";
+                      return (
+                        <form key={`${m.userId}:${c.gameTypeId}`} action={clearMemberDayCorrection} className="mt-2 flex items-center justify-between rounded-lg border border-amber-200 bg-white px-2 py-1">
+                          <input type="hidden" name="targetUserId" value={m.userId} />
+                          <input type="hidden" name="played_on" value={selectedDate} />
+                          <input type="hidden" name="game_type_id" value={c.gameTypeId} />
+                          <p className="text-xs text-amber-900">
+                            {gameLabel}: {c.attempts} {c.reason ? `· ${c.reason}` : ""}
+                          </p>
+                          <SubmitOnceButton className="button-secondary h-7 px-2 text-xs" pendingText="...">
+                            Quitar
+                          </SubmitOnceButton>
+                        </form>
+                      );
+                    })}
                   </div>
                   <div className="flex items-center gap-2">
                     {m.role !== "owner" && isPrimaryOwner ? (
