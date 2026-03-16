@@ -765,18 +765,18 @@ export default async function GroupDetailPage({
         </div>
       </div>
 
-      <div className="panel space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Tus penalizaciones</h2>
-          <p className="text-xs text-slate-500">Hasta {penaltyThroughDay}</p>
-        </div>
-        {!group.penalties_enabled ? (
-          <p className="muted">Las penalizaciones estan desactivadas en este grupo.</p>
-        ) : penaltyDaysForCurrentUser.length === 0 ? (
-          <p className="muted">No tienes dias con penalizacion en el rango actual.</p>
-        ) : (
-          <div className="space-y-2">
-            {penaltyDaysForCurrentUser
+      <details className="panel space-y-3">
+        <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold uppercase tracking-wide text-slate-500">
+          <span>Tus penalizaciones</span>
+          <span className="text-xs normal-case text-slate-500">Hasta {penaltyThroughDay}</span>
+        </summary>
+        <div className="mt-3 space-y-2">
+          {!group.penalties_enabled ? (
+            <p className="muted">Las penalizaciones estan desactivadas en este grupo.</p>
+          ) : penaltyDaysForCurrentUser.length === 0 ? (
+            <p className="muted">No tienes dias con penalizacion en el rango actual.</p>
+          ) : (
+            penaltyDaysForCurrentUser
               .slice()
               .reverse()
               .map((p) => (
@@ -787,10 +787,10 @@ export default async function GroupDetailPage({
                   </div>
                   <p className="text-sm font-semibold text-rose-800">+{p.penaltyPoints} penalizacion</p>
                 </div>
-              ))}
-          </div>
-        )}
-      </div>
+              ))
+          )}
+        </div>
+      </details>
 
       <div className="panel space-y-3">
         <div className="flex items-center justify-between">
