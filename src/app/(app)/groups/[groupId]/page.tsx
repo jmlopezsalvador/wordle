@@ -546,7 +546,7 @@ export default async function GroupDetailPage({
   const isToday = selectedDate >= activeDay;
   const metricQuery = leaderboardMetric === "avg7" ? "&metric=avg7" : "";
   const toggleMetricQuery = leaderboardMetric === "avg7" ? "points" : "avg7";
-  const toggleMetricLabel = leaderboardMetric === "avg7" ? "Ver por puntos" : "Ver media 7d";
+  const toggleMetricLabel = leaderboardMetric === "avg7" ? "Puntos" : "7d";
   const leaderboardTitle = leaderboardMetric === "avg7" ? "Leaderboard (Media 7d)" : "Leaderboard";
   const noticeText =
     notice === "recalculated"
