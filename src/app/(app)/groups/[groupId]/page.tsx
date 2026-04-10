@@ -39,13 +39,14 @@ export default async function GroupDetailPage({
   searchParams
 }: {
   params: Promise<{ groupId: string }>;
-  searchParams: Promise<{ date?: string; notice?: string; error?: string }>;
+  searchParams: Promise<{ date?: string; notice?: string; error?: string; metric?: string }>;
 }) {
   const { groupId } = await params;
-  const { date, notice, error } = await searchParams;
+  const { date, notice, error, metric } = await searchParams;
   const activeDay = getActiveDayISO();
   const lastClosedDay = getLastClosedDayISO();
   const selectedDate = date || activeDay;
+  const leaderboardMetric = metric === "avg7" ? "avg7" : "points";
   const supabase = await createSupabaseServerClient();
 
   const {
@@ -338,16 +339,21 @@ export default async function GroupDetailPage({
   const rankingData: Array<{
     userId: string;
     score: number;
+    metricValue: number;
     name: string;
     avatar: string | null;
     role: string;
     dayPoints: number;
     dayPenaltyPoints: number;
+    avg7Total: number;
+    avg7PerGame: Array<{ gameLabel: string; value: number }>;
     previousScore: number;
     dayGamesCount: number;
     dayPenaltyApplied: boolean;
   }> = [];
   const penaltyThroughDay = selectedDate < lastClosedDay ? selectedDate : lastClosedDay;
+  const avgWindowStart = moveDay(selectedDate, -6);
+  const gameLabelById = new Map((gameTypes || []).map((g) => [g.id, g.label]));
 
   const activeGames = (gameTypes || []).map((g) => ({ id: g.id, maxAttempts: g.max_attempts }));
   const penaltyDaysForCurrentUser: Array<{ day: string; penaltyPoints: number; missingGames: number }> = [];
@@ -417,6 +423,10 @@ export default async function GroupDetailPage({
     let dayPoints = 0;
     let dayGamesCount = 0;
     const effectiveByGame = new Map<number, number>();
+    const avg7PerGameSum = new Map<number, number>();
+    const avg7PerGameCount = new Map<number, number>();
+    let avg7TotalSum = 0;
+    let avg7TotalCount = 0;
     const allDays = joinedOn <= selectedDate ? dateRange(joinedOn, selectedDate) : [];
 
     for (const day of allDays) {
@@ -428,24 +438,21 @@ export default async function GroupDetailPage({
         const key = `${member.user_id}:${day}:${g.id}`;
         const correction = correctionsByUserDayGame.get(key);
         const submission = attemptsByUserDayGame.get(key);
+        let dayGameValue: number | null = null;
 
         if (correction) {
           previousScore += correction.attempts;
           dayNonPenalty += correction.attempts;
           dayCoveredGames += 1;
           effectiveByGame.set(g.id, correction.attempts);
-          continue;
-        }
-
-        if (typeof submission === "number") {
+          dayGameValue = correction.attempts;
+        } else if (typeof submission === "number") {
           previousScore += submission;
           dayNonPenalty += submission;
           dayCoveredGames += 1;
           effectiveByGame.set(g.id, submission);
-          continue;
-        }
-
-        if (group.penalties_enabled && day <= penaltyThroughDay) {
+          dayGameValue = submission;
+        } else if (group.penalties_enabled && day <= penaltyThroughDay) {
           let prevEffective = effectiveByGame.get(g.id);
           if (typeof prevEffective !== "number") {
             let scan = moveDay(day, -1);
@@ -469,6 +476,12 @@ export default async function GroupDetailPage({
           previousScore += penalty;
           dayPenalty += penalty;
           effectiveByGame.set(g.id, penalty);
+          dayGameValue = penalty;
+        }
+
+        if (day >= avgWindowStart && day <= selectedDate && typeof dayGameValue === "number") {
+          avg7PerGameSum.set(g.id, (avg7PerGameSum.get(g.id) || 0) + dayGameValue);
+          avg7PerGameCount.set(g.id, (avg7PerGameCount.get(g.id) || 0) + 1);
         }
       }
 
@@ -478,16 +491,34 @@ export default async function GroupDetailPage({
         dayGamesCount = dayCoveredGames;
         dayPenaltyApplied = dayPenalty > 0;
       }
+
+      if (day >= avgWindowStart && day <= selectedDate) {
+        avg7TotalSum += dayNonPenalty + dayPenalty;
+        avg7TotalCount += 1;
+      }
     }
 
     const total = previousScore;
+    const avg7Total = avg7TotalCount > 0 ? avg7TotalSum / avg7TotalCount : 0;
+    const avg7PerGame = activeGames.map((g) => {
+      const sum = avg7PerGameSum.get(g.id) || 0;
+      const count = avg7PerGameCount.get(g.id) || 0;
+      return {
+        gameLabel: gameLabelById.get(g.id) || "Juego",
+        value: count > 0 ? sum / count : 0
+      };
+    });
+    const metricValue = leaderboardMetric === "avg7" ? avg7Total : total;
 
     rankingData.push({
       userId: member.user_id,
       score: total,
+      metricValue,
       previousScore: Math.max(0, previousScore),
       dayPoints,
       dayPenaltyPoints,
+      avg7Total,
+      avg7PerGame,
       dayGamesCount,
       dayPenaltyApplied,
       name: displayName(profileMap.get(member.user_id)?.username),
@@ -496,9 +527,9 @@ export default async function GroupDetailPage({
     });
   }
 
-  const ranking = rankingData.sort((a, b) => a.score - b.score);
-  const bestScore = ranking.length > 0 ? ranking[0].score : 0;
-  const worstScore = ranking.length > 0 ? ranking[ranking.length - 1].score : 0;
+  const ranking = rankingData.sort((a, b) => a.metricValue - b.metricValue);
+  const bestScore = ranking.length > 0 ? ranking[0].metricValue : 0;
+  const worstScore = ranking.length > 0 ? ranking[ranking.length - 1].metricValue : 0;
   const scoreRange = Math.max(1, worstScore - bestScore);
   const visualMargin = Math.max(1, Math.ceil(scoreRange * 0.2));
   const visualMin = bestScore - visualMargin;
@@ -506,13 +537,17 @@ export default async function GroupDetailPage({
   const visualSpan = Math.max(1, visualMax - visualMin);
   const raceData = ranking.map((r) => ({
     ...r,
-    progress: Math.max(8, Math.min(100, Math.round(((visualMax - r.score) / visualSpan) * 100)))
+    progress: Math.max(8, Math.min(100, Math.round(((visualMax - r.metricValue) / visualSpan) * 100)))
   }));
   const requiredGames = Math.max(1, (gameTypes || []).length);
 
   const prevDate = moveDay(selectedDate, -1);
   const nextDate = moveDay(selectedDate, 1);
   const isToday = selectedDate >= activeDay;
+  const metricQuery = leaderboardMetric === "avg7" ? "&metric=avg7" : "";
+  const toggleMetricQuery = leaderboardMetric === "avg7" ? "points" : "avg7";
+  const toggleMetricLabel = leaderboardMetric === "avg7" ? "Ver por puntos" : "Ver media 7d";
+  const leaderboardTitle = leaderboardMetric === "avg7" ? "Leaderboard (Media 7d)" : "Leaderboard";
   const noticeText =
     notice === "recalculated"
       ? "Puntuaciones recalculadas."
@@ -717,8 +752,13 @@ export default async function GroupDetailPage({
 
       <div className="panel space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Leaderboard</h2>
-          <p className="text-sm font-semibold">{selectedDate}</p>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{leaderboardTitle}</h2>
+          <div className="flex items-center gap-2">
+            <Link className="button-secondary h-8 px-3 text-xs" href={`/groups/${group.id}?date=${selectedDate}&metric=${toggleMetricQuery}`}>
+              {toggleMetricLabel}
+            </Link>
+            <p className="text-sm font-semibold">{selectedDate}</p>
+          </div>
         </div>
         <div className="space-y-2">
           {raceData.map((r) => (
@@ -734,6 +774,9 @@ export default async function GroupDetailPage({
                 <span>{r.name}</span>
                 <span className="text-sky-700">{r.score} pts</span>
               </div>
+              <p className="mb-1 text-[11px] text-slate-500">
+                Media 7d total: {r.avg7Total.toFixed(2)} · {r.avg7PerGame.map((g) => `${g.gameLabel}: ${g.value.toFixed(2)}`).join(" · ")}
+              </p>
               <div
                 className={`relative h-9 rounded-lg ${
                   r.dayPenaltyApplied
@@ -796,14 +839,14 @@ export default async function GroupDetailPage({
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Resultados del dia</h2>
           <div className="flex items-center gap-2">
-            <Link className="button-secondary h-9 px-3" href={`/groups/${group.id}?date=${prevDate}`}>
+            <Link className="button-secondary h-9 px-3" href={`/groups/${group.id}?date=${prevDate}${metricQuery}`}>
               {"<"}
             </Link>
             <p className="min-w-28 text-center text-sm font-semibold">{selectedDate}</p>
             {isToday ? (
               <span className="button-secondary h-9 cursor-not-allowed px-3 opacity-50">{">"}</span>
             ) : (
-              <Link className="button-secondary h-9 px-3" href={`/groups/${group.id}?date=${nextDate}`}>
+              <Link className="button-secondary h-9 px-3" href={`/groups/${group.id}?date=${nextDate}${metricQuery}`}>
                 {">"}
               </Link>
             )}
